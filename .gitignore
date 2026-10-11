@@ -1,0 +1,8 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rcheck/
+panelcointr_*.tar.gz
+# Copyrighted reference papers (JSTOR etc.); keep local, don't redistribute
+literature/*.pdf

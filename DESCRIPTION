@@ -1,0 +1,16 @@
+Package: panelcointr
+Title: Panel Cointegration Tests
+Version: 0.0.0.9000
+Authors@R: 
+    person("G. Nono", "Ghislain", , "nonoghislain@gmail.com", role = c("aut", "cre"))
+Description: Implements panel cointegration tests robust to cross-section
+    dependence and structural breaks, including the error-correction tests
+    of Westerlund (2007), the Durbin-Hausman tests of Westerlund (2008),
+    and the tests of Banerjee and Carrion-i-Silvestre (2015, 2017).
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 8.0.0
+Suggests: 
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
