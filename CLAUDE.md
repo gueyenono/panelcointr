@@ -22,8 +22,18 @@ Rscript -e 'devtools::load_all()'                 # load package for interactive
 
 - Roxygen2 with markdown enabled; `NAMESPACE` and `man/` are generated, so edit roxygen comments in `R/` and rerun `devtools::document()` rather than editing them directly.
 - testthat 3rd edition; test files are `tests/testthat/test-<name>.R`, mirroring `R/<name>.R`.
-- Add dependencies with `usethis::use_package()` so DESCRIPTION stays consistent.
+- Add dependencies with `usethis::use_package()` so DESCRIPTION stays consistent (install them first; see Environment).
 - Non-package directories (`literature/`, `plan/`, `CLAUDE.md`, `.claude/`) are listed in `.Rbuildignore`; add any new non-package top-level paths there too, or `R CMD check` will note them.
+
+## Environment
+
+R, every R package and the Rust toolchain (cargo/rustc from fenix stable) come from nix through the user's home-manager flake at `~/home-manager/`. Install anything missing there, never with `install.packages()`, `pak`, `remotes` or `rustup`:
+
+1. Check the package is in the pinned nixpkgs: `nix eval --raw --inputs-from ~/home-manager nixpkgs#rPackages.<name>.version`.
+2. Add it to the `r_packages` list in `~/home-manager/modules/R/R-packages-list.nix`. Packages missing from nixpkgs need a derivation in that file (see the `*_gh` entries).
+3. Run `hms` (`home-manager switch`), then confirm with `Rscript -e 'library(<name>)'`.
+
+`~/home-manager/CLAUDE.md` documents that repo. Leave committing there to the user.
 
 ## Reference literature
 
