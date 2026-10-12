@@ -1,16 +1,37 @@
 Package: panelcointr
 Title: Panel Cointegration Tests
 Version: 0.0.0.9000
-Authors@R: 
-    person("G. Nono", "Ghislain", , "nonoghislain@gmail.com", role = c("aut", "cre"))
+Authors@R: c(
+    person("G. Nono", "Ghislain", , "nonoghislain@gmail.com", role = c("aut", "cre")),
+    person("Authors of the dependency Rust crates", role = "cph",
+           comment = "see file LICENSE.note")
+  )
 Description: Implements panel cointegration tests robust to cross-section
     dependence and structural breaks, including the error-correction tests
-    of Westerlund (2007), the Durbin-Hausman tests of Westerlund (2008),
-    and the tests of Banerjee and Carrion-i-Silvestre (2015, 2017).
+    of Westerlund (2007) <doi:10.1111/j.1468-0084.2007.00477.x>, the
+    Durbin-Hausman tests of Westerlund (2008), and the tests of Banerjee and
+    Carrion-i-Silvestre (2015, 2017). The computations are written in Rust.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 8.0.0
-Suggests: 
-    testthat (>= 3.0.0)
+Depends:
+    R (>= 4.2)
+Imports:
+    graphics,
+    grDevices,
+    stats,
+    utils
+Suggests:
+    data.table,
+    generics,
+    knitr,
+    plm,
+    rmarkdown,
+    testthat (>= 3.0.0),
+    tibble
+VignetteBuilder: knitr
 Config/testthat/edition: 3
+Config/rextendr/version: 0.5.0
+SystemRequirements: Cargo (Rust's package manager), rustc >= 1.71.0, xz
+LazyData: true

@@ -1,8 +1,9 @@
 # Plan: `pcoint_westerlund()`: Westerlund (2007) error-correction panel cointegration tests
 
-Status: plan, not yet implemented. Written 2026-10-11; reviewed the same day against the paper,
-`xtwest.ado`, crates.io and CRAN's Rust policy (changes: D8 default, new D19, bootstrap details,
-nested IC grid, thread scope, MSRV handling, T2/T4).
+Status: implemented (phases P0 to P7) on 2026-10-11, except the win-builder/rhub runs of P7;
+see §13 for what changed from the plan. Written 2026-10-11; reviewed the same day against the
+paper, `xtwest.ado`, crates.io and CRAN's Rust policy (changes: D8 default, new D19, bootstrap
+details, nested IC grid, thread scope, MSRV handling, T2/T4).
 
 ## 0. Summary
 
@@ -625,3 +626,91 @@ Each phase ends with `devtools::check()` clean.
 | Q12 | At most 6 regressors (the size of the moments table) | 43 | §2.5 (NA asymptotics beyond 6) |
 | Q13 | `westerlund` uses legacy K = 1 moments, different from Table 1: with trend −2.356/0.6450, −11.8978/44.2471, −2.1128/0.7371, −8.9536/35.6802; without −1.793/0.7904, −7.2014/29.3677, −1.4746/1.0262, −4.3559/21.0535 | 1201–1213 | D17 |
 | Q14 | `gen` creates float (single-precision) temporaries, so the last printed digit can differ (Ga −11.2535 prints as −11.254) | throughout | T1 tolerance |
+
+---
+
+## 13. Implementation notes (2026-10-11)
+
+Everything in §§2-10 is implemented as specified, apart from the points below. The open questions
+of §11 were settled by their recommendations: `hce` is shipped (`data/hce`, built by
+`data-raw/hce.R`), the defaults follow the paper, CRAN is the target, extendr is the binding,
+`demean_u = TRUE`, and there is no cross-sectional demeaning.
+
+**Tooling (P0, §7).**
+
+- rextendr 0.5.0 has no `use_cran_defaults()`; `use_extendr()` now writes the CRAN set-up itself
+  (`tools/msrv.R` checks `cargo`/`rustc` on `PATH` and in `~/.cargo/bin`, enforces the MSRV and
+  prints both versions; `-j 2 --offline` when `NOT_CRAN` is unset; `CARGO_HOME` under `src/`;
+  vendored crates from `src/rust/vendor.tar.xz`). Fixed after review: `configure` had a nix-store
+  shebang (now `#!/usr/bin/env sh`), the cleanup scripts had none, and `extendr-api` was `*`
+  (now `0.9`).
+- `crate-type = ["rlib", "staticlib"]`, not `staticlib` alone: rextendr 0.5 generates
+  `R/extendr-wrappers.R` at build time with a `document` binary that links the rlib.
+- `rextendr::write_license_note()` writes a top-level `LICENSE.note` (not `inst/AUTHORS`); the
+  DESCRIPTION `cph` entry points to it. Cargo metadata has no authors for the extendr crates, so
+  "The extendr developers" is filled in by hand.
+- The locked tree (12 crates) declares `rust-version <= 1.71`, `Cargo.lock` is version 3, and the
+  vendored tarball is 0.57 MB. MSRV check: a one-off `nix build` of fenix's
+  `toolchainOf { channel = "1.71.0"; }` (not added to `home.packages`) built the crate offline from
+  the vendored sources, passed `cargo test`, and installed the package tarball with `NOT_CRAN`
+  unset ("Building for CRAN", `cargo build -j 2 --offline`, nothing written to `HOME`). Doing this
+  in CI (`rustup toolchain install 1.71`) is left for when the repository has CI.
+- `R CMD check --as-cran` (via `devtools::check()`): 0 errors, 0 warnings, 0 notes, after adding
+  `checkbashisms` to home-manager. The installed size is 6.1 MB (5.8 MB `libs`, mostly debug
+  information of Rust's precompiled `std`; 3 MB stripped), which CRAN will report as a NOTE.
+- `devtools::document()` replaces the deprecated `rextendr::document()`.
+
+**Engine.**
+
+- AIC and BIC are `-2 log L + 2k` and `-2 log L + k log n` of the Gaussian regression (Stata's
+  `estat ic`). On the common sample this ranks candidates exactly as `n log(RSS/n) + 2k`; on
+  varying samples (`xtwest`) the constant `n (1 + log 2 pi)` matters and is needed to reproduce it.
+- Rank deficiency uses `lm.fit`'s criterion on unit-norm columns (tolerance 1e-7). The
+  Gram-Cholesky selection falls back to a QR of the nested design when a pivot's squared relative
+  norm is below 1e-10.
+- The bootstrap draws `len = burn + T_span + max_i q_i` indices per replicate, as an R vector
+  read in consecutive blocks (one block per replicate). The results therefore do not depend on
+  `boot_chunk` either, not only on `n_threads`. Two internal functions
+  (`westerlund_boot_state_rs()`, `westerlund_boot_panel_rs()`) expose the first stage and one
+  generated panel, so the DGP is tested against an R re-implementation.
+- Bootstrap critical values are quantiles of type 1, the order statistics that match the
+  plus-one p-value.
+
+**Compatibility with xtwest (§3).**
+
+- One more quirk, beside Q1-Q14: Q15. `xtwest` takes `meanbigT` (the `T` in the panel
+  normaliser and in `sigma_i`, Q4) as `summarize` of the per-row `T_i`, so in unbalanced panels it is the
+  row-weighted mean `sum T_i^2 / sum T_i`. The compat presets do the same.
+- Q6 has no effect: the `westerlund` criterion adds the same constant to every candidate of a
+  unit, so the first-observation values of `cons` and `tren` never change the selection.
+- The compat presets cover the statistics only. The bootstrap controls keep the package defaults
+  (re-selection, `burn = 50`, plus-one p-value) under any `compat`; `boot_pvalue = "xtwest"` is
+  available separately. With `compat`, `lrwindow = NULL` means 2 (xtwest's default);
+  `deterministic` is never changed by `compat`.
+- `compat = "xtwest_westerlund"` requires a constant and a single regressor, as `xtwest` does;
+  it uses its own information criterion and warns if `criterion` is supplied.
+- The internal compat settings (not in `westerlund_control()`) are `ic_ties`, `lrv_y_sample`,
+  `u_sample`, `se_alpha`, `sigma_df`, `ga_weights`, `tbar` and `moments`; all are stored in
+  `result$settings`.
+
+**Validation (§8).** T1-T6 are in `tests/testthat` and pass: the three published runs to 1e-3
+(run 2's Ga is -11.2535, printed by xtwest as -11.254, Q14); the Rust engine against the oracle at
+1e-10 over 80 random configurations (case x K x fixed/IC x balanced/unbalanced x compat) plus every
+control setting; the invariances of T4; the D7 regression test (loghex x 3 gives xtwest's mean
+orders 1.20/0.20 and Gt -2.843, but no change on the common sample). T7 and §9 results are in
+`inst/validation/RESULTS.md`:
+
+- The Table 1 literal is confirmed by simulation (all 72 means within Monte Carlo error).
+- In the Case 1 designs of Tables 2 and 5, Ga and Pa reject less often than in the paper because
+  the simulated data start away from zero after the 50-period burn-in. Without burn-in the paper's
+  Table 2 sizes are matched (Ga 6.4 vs 7.2, Pa 12.0 vs 11.7 for N = 20, T = 100), which suggests
+  the paper's simulations started at zero. With a constant the burn-in is irrelevant.
+- Under cross-sectional dependence the bootstrap brings the size close to 5%, with a remaining
+  excess for Ga* as in the paper's Table 5.
+- Every §9 target is met (e.g. 10.3 s instead of 60 s for N = 100, T = 200, B = 999 on one
+  thread; 3.6x on four threads).
+- For information: CRAN's `Westerlund` 0.1.3 gives the same statistics as the compat modes on
+  the three published runs, to within 2e-12.
+
+**Not done.** win-builder and rhub submissions (they send the package to external services), and
+a CI workflow.

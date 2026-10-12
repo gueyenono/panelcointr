@@ -6,3 +6,8 @@
 panelcointr_*.tar.gz
 # Copyrighted reference papers (JSTOR etc.); keep local, don't redistribute
 literature/*.pdf
+src/rust/vendor
+src/Makevars
+src/Makevars.win
+/doc/
+/Meta/
