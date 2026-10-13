@@ -14,6 +14,8 @@ Description: Implements panel cointegration tests robust to cross-section
     common factors and structural breaks. The computations are written in
     Rust.
 License: MIT + file LICENSE
+URL: https://github.com/gueyenono/panelcointr
+BugReports: https://github.com/gueyenono/panelcointr/issues
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 8.0.0
