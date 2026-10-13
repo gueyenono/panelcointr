@@ -16,6 +16,9 @@
   not cover. The computations, including the simulations, are in Rust and
   run in parallel with results independent of the number of threads.
 * New `banerjee_control()` for the fine-grained settings.
+* Vignettes for both tests, written for readers new to cointegration: what
+  the tests ask, how to run them, how to read every line of the output, and
+  a practical checklist.
 
 * New `pcoint_westerlund()`: the error-correction panel cointegration tests
   Gt, Ga, Pt and Pa of Westerlund (2007), with asymptotic p-values from the

@@ -1,8 +1,8 @@
 ---
-title: "Error-correction panel cointegration tests (Westerlund 2007)"
+title: "A beginner's guide to the Westerlund (2007) error-correction tests"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Error-correction panel cointegration tests (Westerlund 2007)}
+  %\VignetteIndexEntry{A beginner's guide to the Westerlund (2007) error-correction tests}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -11,68 +11,296 @@ vignette: >
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 ```
 
+This guide shows how to check whether variables share a long-run
+relationship in panel data, with the tests of Westerlund (2007) and the
+function `pcoint_westerlund()`. It assumes that you know what a regression
+and a p-value are, and nothing more. Technical words are explained when
+they first appear, and again in the glossary at the end.
+
 ```{r setup}
 library(panelcointr)
 ```
 
-## The tests
+## 1. The question
 
-Westerlund (2007) tests the null hypothesis of no cointegration by asking
-whether the error-correction term of a conditional error-correction model
-is zero. For each unit $i$,
+Many economic series grow over time: income, prices, health spending. Two
+growing series will look related even when they have nothing to do with
+each other, so a regression on their levels can be badly misleading. Here
+are two series of pure noise that never influence each other:
+
+```{r spurious}
+set.seed(1)
+a <- cumsum(rnorm(100))   # a "random walk": each value is the last one plus noise
+b <- cumsum(rnorm(100))   # another one, unrelated to a
+coef(summary(lm(a ~ b)))
+```
+
+The t-value of `b` is far from zero, yet `b` has no effect on `a`. This is a
+**spurious regression** (Granger and Newbold 1974). It happens because each
+series wanders off without a fixed level to come back to. Such a series is
+called **non-stationary**, or is said to have a **unit root**. A shock to it
+never fades away: it shifts the series for good.
+
+Some wandering series really are linked, though: they wander *together*.
+Picture a person walking a dog on a long leash (Murray 1994). Each of them
+wanders around, but the leash stops them from drifting far apart. Series
+like these are **cointegrated**: each one wanders, but the gap between them
+(the leash) stays within bounds. When they drift apart, something pulls them
+back towards each other. That pull is called **error correction**.
+
+The Westerlund tests ask one question: **is there error correction?** If
+there is, the variables are cointegrated.
+
+* The **null hypothesis** (what the test assumes until the data say
+  otherwise) is *no cointegration*: no leash.
+* A **small p-value** (below 0.05, say) is evidence *for* cointegration.
+
+Why use a **panel**, that is, many units (countries, regions, firms) observed
+over time? With a single country you often have 30 to 50 yearly
+observations, which is too few to tell a leash from no leash. Pooling the
+information of many countries makes the test much more reliable.
+
+## 2. The data
+
+The package includes the data of the paper's example: per-capita health care
+expenditure and GDP, in logs, for 20 OECD countries from 1970 to 2001. The
+question is whether health spending and income move together in the long
+run.
+
+```{r data}
+head(hce)
+```
+
+The data are in **long format**: one row per country and year. `ctr`
+identifies the country (1 to 20; the source does not name them) and `year`
+counts the years (1 is 1970, 32 is 2001). These two columns are the **panel
+index**. `loghex` and `loggdp` are the logs of health spending and GDP.
+
+It always helps to look at the data first. Each line is one country:
+
+```{r plot-data, fig.width = 7, fig.height = 3.5}
+years <- 1969 + sort(unique(hce$year))
+hex <- matrix(hce$loghex, nrow = length(years))   # one column per country
+gdp <- matrix(hce$loggdp, nrow = length(years))
+op <- par(mfrow = c(1, 2), mar = c(4, 4, 2, 1))
+matplot(years, hex, type = "l", lty = 1, col = "grey40",
+        xlab = "Year", ylab = "log", main = "Health spending per capita")
+matplot(years, gdp, type = "l", lty = 1, col = "grey40",
+        xlab = "Year", ylab = "log", main = "GDP per capita")
+par(op)
+```
+
+Both series climb steadily in every country: they have upward **trends**.
+Keep this in mind for the `deterministic` setting below.
+
+## 3. Running the test
+
+```{r first}
+fit <- pcoint_westerlund(loghex ~ loggdp, data = hce, index = c("ctr", "year"),
+                         deterministic = "trend", lags = c(1, 3), leads = c(0, 3))
+```
+
+What each argument means:
+
+* `loghex ~ loggdp` has the form `y ~ x`. The test asks whether `y` (here
+  health spending) corrects towards its long-run relationship with `x`, so
+  put on the left the variable you expect to adjust. You can use several
+  explanatory variables, as in `y ~ x1 + x2` (up to six for the standard
+  p-values).
+* `data` and `index`: the data frame and the names of its unit and time
+  columns.
+* `deterministic`: what the long-run relationship contains besides the
+  variables. `"constant"` (the default) allows a different average level for
+  each country; `"trend"` adds a straight-line trend for each country. Both
+  of our series trend upwards, so we use `"trend"`. `"none"` is rarely
+  appropriate.
+* `lags = c(1, 3)`: the number of past changes of the variables in each
+  country's equation, which capture short-run movements. A range such as
+  `c(1, 3)` lets each country pick its own number between 1 and 3 with an
+  **information criterion** (AIC by default), a rule that balances fit
+  against complexity. `lags` has no default, because results can depend on
+  it: choose a sensible range and check that your conclusion does not hinge
+  on it.
+* `leads = c(0, 3)`: the number of future changes of `x` in the equation.
+  Leads protect the test when `x` itself reacts to `y` (here, if health
+  spending also affected GDP). The default, 0, includes none.
+
+## 4. Reading the output
+
+```{r print}
+fit
+```
+
+Line by line:
+
+* **H0: no cointegration** reminds you of the null hypothesis.
+* **20 units, 1 regressor ...** describes what was used: 20 countries, one
+  explanatory variable, 32 years, and a constant and trend.
+* **Lags** and **Leads**: each country chose between 1 and 3 lags, and on
+  average it chose about 2. The same goes for the leads.
+* **Bartlett bandwidth** is a technical setting used inside two of the
+  statistics. The default is fine.
+* **The table** has four statistics, which answer slightly different
+  questions:
+  * `Gt` and `Ga`, the **group-mean** statistics, test each country
+    separately and then average the results. Rejecting means that *at
+    least some* countries error-correct.
+  * `Pt` and `Pa`, the **panel** statistics, pool all countries and assume
+    they adjust at the same speed. Rejecting means that the panel *as a
+    whole* error-corrects.
+  * `Value` is the raw statistic. `Z-value` puts it on a common scale (a
+    standard normal distribution); the more negative it is, the stronger
+    the evidence of cointegration. `P-value` is the probability of getting
+    a Z-value at least this negative if there were no cointegration.
+
+All four p-values are below 0.05, which seems to say that health spending
+and income are cointegrated. **But these p-values rest on an assumption
+that is doubtful here**, as the next section explains.
+
+## 5. A crucial check: countries are not independent
+
+The p-values above assume that what happens in one country is unrelated to
+what happens in the others. With OECD countries this is hard to believe:
+oil shocks, recessions and new medical technologies hit many countries at
+the same time. Units that move together like this show **cross-section
+dependence**, and it can make the standard p-values much too small.
+
+The remedy is the **bootstrap**. The function builds many artificial data
+sets in which, by construction, there is no cointegration, but in which the
+countries still move together as they do in the real data (it reshuffles
+whole years, so that all countries share the same draw). It computes the
+statistics on each artificial data set and then asks how often they are as
+negative as the real ones. That share is the **robust p-value**.
+
+`bootstrap = 499` asks for 499 artificial data sets. Because the bootstrap
+is random, call `set.seed()` first, so that you get the same numbers every
+time you run the code:
+
+```{r boot}
+set.seed(2007)
+fit_boot <- pcoint_westerlund(loghex ~ loggdp, data = hce, index = c("ctr", "year"),
+                              deterministic = "trend", lags = c(1, 3), leads = c(0, 3),
+                              bootstrap = 499)
+fit_boot
+```
+
+The new column, `Robust P`, tells a different story: the robust p-values
+range from `r min(fit_boot$statistics$p_boot)` to
+`r max(fit_boot$statistics$p_boot)`, and none is below 0.05. Once we allow
+the countries to move together, **the evidence of cointegration is weak**.
+With only 32 years and countries hit by the same shocks, the data cannot
+tell clearly whether there is a leash.
+
+**Which p-values should you report?** Whenever your units can be hit by
+common shocks (nearly always with countries, regions, or firms in the same
+market), use the robust ones. The standard p-values are fine only when the
+units are plausibly independent. For final results, use more replications,
+such as `bootstrap = 999`; the computation is fast.
+
+`plot()` shows the bootstrap distribution of each statistic as a histogram.
+The solid line is the real statistic and the dashed line the 5% critical
+value: the real statistic must fall to the left of the dashed line to reject
+at the 5% level. Here all four lie to the right of their dashed lines:
+
+```{r plot-boot, fig.width = 7, fig.height = 5}
+plot(fit_boot)
+```
+
+## 6. Looking inside the results
+
+`summary()` adds more detail:
+
+```{r summary}
+s <- summary(fit_boot)
+s
+```
+
+* **Bootstrap critical values**: thresholds for each statistic. A statistic
+  below its 5% critical value rejects the null at the 5% level.
+* **Selected lags and leads**: how many countries chose each number.
+* **Mean-group error-correction model**: averages of the countries' own
+  estimates. They describe the relationship *if* the variables are
+  cointegrated, so after the bootstrap results above, read them with care.
+  * *Long run*: the `loggdp` estimate,
+    `r round(s$mean_group$long_run["loggdp", "estimate"], 2)`, says that a
+    1% higher GDP goes with about
+    `r round(s$mean_group$long_run["loggdp", "estimate"], 2)`% higher health
+    spending in the long run, on average across countries.
+  * *Short run*: `ec`, `r round(s$mean_group$short_run["ec", "estimate"], 2)`,
+    is the average **speed of adjustment**: each year, about
+    `r round(-100 * s$mean_group$short_run["ec", "estimate"])`% of any gap
+    between health spending and its long-run level is closed. A value near
+    0 would mean no error correction.
+* **Units**: one row per country. `alpha` is that country's speed of
+  adjustment and `t_alpha` its t-ratio (more negative means stronger evidence
+  of error correction in that country). `lags` and `leads` are the orders it
+  chose.
+
+The pieces of the result are ordinary R objects that you can use in your
+own tables and plots:
+
+```{r pieces}
+fit_boot$statistics
+head(fit_boot$units)
+```
+
+## 7. Practical checklist
+
+* **Data.** Long format, one row per unit and period. The time variable
+  must step by one within each unit. Missing values at the start or end of a
+  unit are dropped; gaps in the middle are an error. Units may cover
+  different periods.
+* **Before testing.** The variables should be non-stationary: cointegration
+  is only about series that wander. Panel unit root tests, such as
+  `plm::purtest()`, can check this.
+* **`deterministic`.** Use `"trend"` if the series trend, `"constant"`
+  otherwise.
+* **`lags` and `leads`.** Give ranges and let each unit choose. Check that
+  the conclusion survives a different range.
+* **Cross-section dependence.** Use `bootstrap` and report the robust
+  p-values, with `set.seed()` for reproducibility.
+* **Group-mean vs panel statistics.** If `Gt` and `Ga` reject but `Pt` and
+  `Pa` do not, only some units may error-correct. If the panel statistics
+  reject but the group-mean ones do not, the evidence comes from pooling.
+* **Short panels.** With few time periods (here 32), conclusions are
+  fragile. Say so when you report them.
+
+If your units share strong common shocks or have sudden breaks (a reform, a
+crisis), the companion guide to `pcoint_banerjee()`,
+`vignette("banerjee", package = "panelcointr")`, covers a test that models
+both explicitly.
+
+## 8. Going further (optional)
+
+### The model behind the test
+
+For each unit $i$ the test estimates an **error-correction model**:
 
 $$
 \Delta y_{it} = \delta_i' d_t + \alpha_i y_{i,t-1} + \lambda_i' x_{i,t-1}
   + \sum_{j=1}^{p_i} \alpha_{ij} \Delta y_{i,t-j}
-  + \sum_{j=-q_i}^{p_i} \gamma_{ij}' \Delta x_{i,t-j} + e_{it},
+  + \sum_{j=-q_i}^{p_i} \gamma_{ij}' \Delta x_{i,t-j} + e_{it}.
 $$
 
-and the null is $\alpha_i = 0$ for all $i$. Unlike residual-based tests,
-this does not impose a common-factor restriction, which can cost them a
-lot of power.
+$\Delta$ means "change from the previous period" and $d_t$ holds the
+constant and trend. The key coefficient is $\alpha_i$, the speed of
+adjustment. If $\alpha_i < 0$, then whenever $y$ is above its long-run level
+it tends to fall back: that is error correction. The null hypothesis is
+$\alpha_i = 0$ for every unit. `Gt` and `Ga` average the unit-level t-ratios
+and (suitably scaled) estimates of $\alpha_i$; `Pt` and `Pa` estimate one
+common $\alpha$ from all units together. The lags ($p_i$) and leads ($q_i$) are the short-run terms set by
+`lags` and `leads`.
 
-There are four statistics. The group-mean statistics $G_\tau$ (`Gt`) and
-$G_\alpha$ (`Ga`) average unit-level t-ratios and coefficients and test
-against $\alpha_i < 0$ for at least one unit. The panel statistics
-$P_\tau$ (`Pt`) and $P_\alpha$ (`Pa`) pool the information on a common
-$\alpha$ and test against $\alpha_i = \alpha < 0$ for all units. All four
-are left-tailed. Asymptotic p-values come from the moments of the paper's
-Table 1; bootstrap p-values are robust to cross-sectional dependence.
+### Matching Stata's xtwest
 
-## Health care expenditure and GDP
+The Stata command `xtwest` (Persyn and Westerlund 2008) departs from the
+paper in a few details, for example in how it chooses the lags. By default
+`pcoint_westerlund()` follows the paper; `compat = "xtwest"` reproduces
+`xtwest`, and `compat = "xtwest_westerlund"` its `westerlund` option. With
+the three calls published by Persyn and Westerlund (2008), the results match
+their output:
 
-The `hce` data are the paper's application: per-capita health care
-expenditure and GDP for 20 OECD countries, 1970 to 2001.
-
-```{r}
-str(hce)
-```
-
-Both series trend, so the model has a constant and a trend. With lags and
-leads chosen by AIC between 1 and 3 and between 0 and 3, and the default
-bandwidth $\lfloor 4 (T/100)^{2/9} \rfloor = 3$:
-
-```{r}
-fit <- pcoint_westerlund(loghex ~ loggdp, data = hce, index = c("ctr", "year"),
-                         deterministic = "trend", lags = c(1, 3), leads = c(0, 3))
-fit
-```
-
-All four tests reject the null of no cointegration at the 5% level with
-the asymptotic p-values.
-
-## Reproducing Stata's xtwest
-
-The defaults follow the paper. The Stata command `xtwest` (Persyn and
-Westerlund 2008) departs from it in several places, for example by
-normalising $G_\alpha$ with the residual degrees of freedom, using the
-average lag length for the panel statistics, and comparing information
-criteria across samples of different sizes. `compat = "xtwest"` reproduces
-it, and `compat = "xtwest_westerlund"` reproduces its `westerlund` option.
-The three calls of Persyn and Westerlund (2008) give their published
-output:
-
-```{r}
+```{r xtwest}
 runs <- list(
   list(lags = 1, leads = 1, lrwindow = 3, compat = "xtwest"),
   list(lags = c(1, 2), leads = c(0, 1), lrwindow = 2, compat = "xtwest"),
@@ -92,92 +320,46 @@ knitr::kable(cbind(run = 1:3, round(ours, 3)), caption = "panelcointr")
 knitr::kable(cbind(run = 1:3, published), caption = "Published xtwest output")
 ```
 
-The only difference is in the last digit of Ga in the second call. The
-value is -11.2535, which `xtwest` prints as -11.254 because Stata stores
-its intermediate variables in single precision.
+The only difference is the last digit of `Ga` in the second call: the value
+is -11.2535, which `xtwest` prints as -11.254 because Stata stores its
+intermediate results in single precision. `?westerlund_control` lists every
+difference between the paper and `xtwest`, and lets you switch each one
+separately.
 
-The third call also matches the z-values of the paper's Table 7
-(-9.613, -10.626, -4.100, -10.119), which were computed with the moments
-hard-coded in `xtwest`'s `westerlund` option:
+## Glossary
 
-```{r}
-r3 <- pcoint_westerlund(loghex ~ loggdp, data = hce, index = c("ctr", "year"),
-                        deterministic = "trend", lags = c(1, 3), leads = c(0, 3),
-                        lrwindow = 3, compat = "xtwest_westerlund")
-round(r3$statistics$z, 3)
-```
-
-`?westerlund_control` lists every difference and lets you switch each one
-on its own. For example, `xtwest` compares the information criterion of
-each lag order on that order's own sample. The choice then depends on the
-units of `y`: multiplying `loghex` by 3 changes `xtwest`'s selected
-orders, while the default comparison on a common sample does not.
-
-```{r}
-hce3 <- transform(hce, loghex = 3 * loghex)
-avg_orders <- function(data, ...) {
-  r <- pcoint_westerlund(loghex ~ loggdp, data = data, index = c("ctr", "year"),
-                         deterministic = "trend", lags = c(1, 2), leads = c(0, 1),
-                         lrwindow = 2, ...)
-  c(lags = mean(r$units$lags), leads = mean(r$units$leads))
-}
-rbind(xtwest = avg_orders(hce, compat = "xtwest"),
-      xtwest_rescaled = avg_orders(hce3, compat = "xtwest"),
-      default = avg_orders(hce),
-      default_rescaled = avg_orders(hce3))
-```
-
-## Bootstrap p-values
-
-The asymptotic p-values assume that the units are cross-sectionally
-independent, which is doubtful for OECD aggregates. The bootstrap of the
-paper's Section 5 resamples whole periods (the same periods for all
-units) from the null-imposed residuals, which preserves any
-cross-sectional dependence. The indices are drawn with R's random number
-generator, so `set.seed()` makes the results reproducible whatever the
-number of threads.
-
-```{r}
-set.seed(2007)
-fit_boot <- pcoint_westerlund(loghex ~ loggdp, data = hce, index = c("ctr", "year"),
-                              deterministic = "trend", lags = c(1, 3), leads = c(0, 3),
-                              bootstrap = 499, n_threads = 2)
-fit_boot
-```
-
-The bootstrap p-values are much larger than the asymptotic ones. With
-$T = 32$, up to three lags and leads chosen by AIC, and cross-sectionally
-dependent data, the null distributions are far to the left of their
-asymptotic counterparts (compare the bootstrap critical values in
-`summary()` below), and the evidence of cointegration is much weaker. The
-paper's Table 7 reports bootstrap rejections. Those use Westerlund's
-original settings, which `compat = "xtwest_westerlund"` reproduces, and
-the original bootstrap code, which differs from the one here in its
-initialisation, centring and lag selection. Its bootstrap p-values cannot
-be reproduced exactly. `plot()` shows the bootstrap distributions:
-
-```{r, fig.width = 7, fig.height = 5}
-plot(fit_boot)
-```
-
-## Unit-level results
-
-`summary()` adds the bootstrap critical values, the distribution of the
-selected orders, the mean-group error-correction model and the unit-level
-results:
-
-```{r}
-summary(fit_boot)
-```
-
-The `units` element holds the unit-level estimates, and `coefficients`
-holds each unit's full error-correction model:
-
-```{r}
-head(fit$units)
-```
+* **Bootstrap**: a way to get p-values by simulating many artificial data
+  sets that resemble the real one but satisfy the null hypothesis.
+* **Cointegration**: two or more non-stationary series that move together
+  in the long run, so that the gap between them stays within bounds.
+* **Cross-section dependence**: units that move together because they are
+  hit by the same shocks.
+* **Error correction**: the tendency of a variable to move back towards its
+  long-run relationship with others after a deviation.
+* **Information criterion (AIC, BIC)**: a score that rewards fit and
+  penalises extra terms, used to pick the number of lags.
+* **Lags and leads**: past and future values of a variable's changes.
+* **Long format**: one row per unit and period, with the unit and time in
+  their own columns.
+* **Non-stationary (unit root)**: a series that wanders without returning to
+  a fixed level or trend; shocks to it are permanent.
+* **Null hypothesis**: the statement a test assumes until the data provide
+  enough evidence against it. Here: no cointegration.
+* **Panel data**: the same units (countries, firms) observed over several
+  periods.
+* **P-value**: the probability of a result at least as extreme as the one
+  observed if the null hypothesis were true. Small values are evidence
+  against the null.
+* **Spurious regression**: a regression that finds a "significant" link
+  between unrelated non-stationary series.
 
 ## References
+
+Granger, C. W. J. and Newbold, P. (1974). Spurious regressions in
+econometrics. *Journal of Econometrics* 2(2), 111-120.
+
+Murray, M. P. (1994). A drunk and her dog: an illustration of cointegration
+and error correction. *The American Statistician* 48(1), 37-39.
 
 Persyn, D. and Westerlund, J. (2008). Error-correction-based cointegration
 tests for panel data. *Stata Journal* 8(2), 232-241.
