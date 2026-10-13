@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`panelcointr` is an R package (R >= 4.6 available locally via nix) implementing panel cointegration tests robust to cross-section dependence and structural breaks. The numerics are in Rust (extendr). Implemented: `pcoint_westerlund()` (Westerlund 2007; design and decisions in `plan/westerlund.md`).
+`panelcointr` is an R package (R >= 4.6 available locally via nix) implementing panel cointegration tests robust to cross-section dependence and structural breaks. The numerics are in Rust (extendr). Implemented: `pcoint_westerlund()` (Westerlund 2007; design and decisions in `plan/westerlund.md`). Planned: `pcoint_banerjee()` (Banerjee & Carrion-i-Silvestre 2015; `plan/banerjee.md`).
 
 ## Commands
 
@@ -54,6 +54,10 @@ R, every R package and the Rust toolchain (cargo/rustc from fenix stable) come f
 - `guid-984886be-…-ASSET1.0.pdf`: Westerlund (2006), "Testing for error correction in panel data", METEOR RM 056 (ECM-based tests Gt, Ga, Pt, Pa).
 - `BANERJEE-COINTEGRATIONPANELDATA-2015.pdf`: Banerjee & Carrion-i-Silvestre (2015, *JAE*), "Cointegration in panel data with structural breaks and cross-section dependence".
 - `bbs-dp2017-02.pdf`: Banerjee & Carrion-i-Silvestre (2017), "Testing for panel cointegration using common correlated effects estimators", Birmingham Business School DP 2017-02.
+- `Banerjee-CarrioniSilvestre-ECBWP591-2006.pdf`: ECB Working Paper 591 (2006), the earlier version of the 2015 *JAE* paper; its appendix has the DOLS treatment of endogenous regressors and finite-sample moments (Table 9). PDF page = paper page + 1.
+- `Bai-Ng-NumberOfFactors-2002.pdf`: Bai & Ng (2002, *Econometrica*), factor-number criteria (PC_p, IC_p, BIC3). PDF page = paper page - 190.
+- `Bai-Ng-PANIC-2004.pdf`: Bai & Ng (2004, *Econometrica*), PANIC and the MQ tests (critical values in Table I, p. 1136). PDF page = paper page - 1126.
+- `Ng-Perron-TruncationLag-1995.pdf`: Ng & Perron (1995, *JASA*), the t-sig lag rule. A scanned JSTOR copy (no text layer; view the page images). PDF page = paper page - 266.
 
 Read them with `pdftotext`, e.g. `pdftotext -f 5 -l 10 literature/<file>.pdf -`. Several PDFs start with a JSTOR or repository cover page, so PDF page numbers are offset from the papers' own.
 
