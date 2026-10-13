@@ -14,9 +14,12 @@
 #' differences of the model's deterministic terms and of the regressors
 #' (Section 2.2 of the paper). The residuals of all units form an
 #' \eqn{n \times N}{n x N} matrix from which \eqn{r}{r} common factors are
-#' estimated by principal components; \eqn{r}{r} is chosen by the BIC3 criterion
-#' of Bai and Ng (2002) with at most `max_factors` factors unless it is
-#' fixed. The defactored residuals are cumulated and each unit's ADF
+#' estimated by principal components; \eqn{r}{r} is chosen by the IC_p1
+#' criterion of Bai and Ng (2002) with at most `max_factors` factors unless
+#' it is fixed. IC_p1 is the criterion of Bai and Ng (2004), which the paper
+#' cites for its "panel BIC", and it reproduces the factor choices that
+#' Banerjee and Carrion-i-Silvestre (2017) report for their production
+#' function data. The defactored residuals are cumulated and each unit's ADF
 #' t-ratio \eqn{t_i}{t_i} is computed from a regression without
 #' deterministic terms. The panel statistic is
 #' \deqn{Z = \sqrt{N} (\bar t - \Theta) / \sqrt{\Psi},}{Z = sqrt(N) (tbar - Theta) / sqrt(Psi),}
@@ -100,8 +103,8 @@
 #' @param break_type `"heterogeneous"` or `"homogeneous"` estimated breaks;
 #'   only with `breaks = 1` or `2`.
 #' @param factors Number of common factors: a criterion of Bai and Ng (2002),
-#'   `"bic3"` (default), `"ic1"`, `"ic2"`, `"ic3"`, `"pc1"`, `"pc2"` or
-#'   `"pc3"`, or a fixed number (0 for none).
+#'   `"ic1"` (default), `"ic2"`, `"ic3"`, `"pc1"`, `"pc2"`, `"pc3"` or
+#'   `"bic3"`, or a fixed number (0 for none).
 #' @param max_factors Largest number of factors considered by the criterion
 #'   (default 6, as in the paper, lowered to \eqn{\min(N, n) - 1}{min(N, n) - 1}
 #'   for small panels, `n` being the number of first-difference
@@ -149,6 +152,10 @@
 #' panel data with breaks and cross-section dependence. ECB Working Paper
 #' 591.
 #'
+#' Banerjee, A. and Carrion-i-Silvestre, J. L. (2017). Testing for panel
+#' cointegration using common correlated effects estimators. Birmingham
+#' Business School Discussion Paper 2017-02.
+#'
 #' Bai, J. and Ng, S. (2002). Determining the number of factors in
 #' approximate factor models. *Econometrica* 70(1), 191-221.
 #'
@@ -180,7 +187,7 @@
 #' }
 pcoint_banerjee <- function(formula, data, index = NULL, model, breaks = NULL,
                             break_type = c("heterogeneous", "homogeneous"),
-                            factors = "bic3", max_factors = 6L, lags = NULL, dols = 0L,
+                            factors = "ic1", max_factors = 6L, lags = NULL, dols = 0L,
                             trim = 0.15, control = banerjee_control(),
                             n_threads = getOption("panelcointr.threads", 1L)) {
   call <- match.call()

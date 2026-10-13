@@ -6,7 +6,9 @@
   breaks absent, known (common or unit-specific) or estimated (one or two
   per unit, heterogeneous by the iterative least-squares procedure or
   common by the infimum statistic); factors by principal components with
-  the Bai and Ng (2002) criteria; ADF lags by the t-sig rule; DOLS terms for
+  the Bai and Ng (2002) criteria (IC_p1 by default, which reproduces the
+  factor choices of Banerjee and Carrion-i-Silvestre 2017); ADF lags by the
+  t-sig rule; DOLS terms for
   endogenous regressors. The common factors are tested by an ADF test or
   the MQ tests of Bai and Ng (2004), and the CD statistic checks the
   independence of the idiosyncratic errors. Moments and critical values

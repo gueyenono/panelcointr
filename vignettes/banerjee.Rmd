@@ -114,7 +114,7 @@ safer there.
 
 ## Settings
 
-`factors` fixes the number of factors or chooses the criterion (BIC3 of Bai
+`factors` fixes the number of factors or chooses the criterion (IC_p1 of Bai
 and Ng 2002 by default, at most `max_factors = 6`), `lags` the ADF lag order
 (t-sig rule of Ng and Perron 1995 by default) and `dols` adds leads and lags
 of $\Delta^2 x$ for endogenous regressors. `banerjee_control()` holds the

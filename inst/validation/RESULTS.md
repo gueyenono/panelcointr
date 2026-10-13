@@ -150,8 +150,13 @@ draws with the printed values, allowing for the papers' own Monte Carlo error
 
 `Rscript inst/validation/banerjee-size.R 300` (N = 40, one factor, rho = 1,
 phi = 1, a break at lambda = 0.5 with theta = 3 and, in Models 4 to 6,
-delta_2 = 3; 102 s). Rejection rates at 5%; Monte Carlo standard error about
-1.3 points.
+delta_2 = 3; 103 s). Rejection rates at 5%; Monte Carlo standard error about
+1.3 points. Rerun on 2026-10-13 after the default factor criterion changed
+from BIC3 to IC_p1 (see T9). The rows without breaks, with known breaks and
+with heterogeneous breaks are unchanged. With homogeneous breaks IC_p1
+sometimes adds a factor, so mean r rises (BIC3 gave 1.00, 1.00, 1.99, 2.00,
+1.01 and 2.00 in those rows), and the rejection rates move by up to 5
+points.
 
 | Model | Breaks | T | sigma2_F | Z, N(0,1) | Z*, Table III | factor ADF | mean r |
 |---|---|---|---|---|---|---|---|
@@ -161,14 +166,15 @@ delta_2 = 3; 102 s). Rejection rates at 5%; Monte Carlo standard error about
 | 6 | known, 50 | 100 | 1 | 11.0 | | 7.3 | 1.00 |
 | 5 | known, 50 | 100 | 1 | 9.7 | | 7.7 | 1.00 |
 | 2 | 1, heterogeneous | 100 | 1 | 8.7 | | 7.7 | 1.00 |
-| 2 | 1, homogeneous | 50 | 0.5 | 33.0 | 22.0 | 10.7 | 1.00 |
+| 2 | 1, homogeneous | 50 | 0.5 | 33.3 | 21.7 | 12.1 | 1.34 |
 | 2 | 1, homogeneous | 100 | 0.5 | 20.3 | 8.3 | 6.0 | 1.00 |
-| 5 | 1, homogeneous | 50 | 0.5 | 94.0 | 80.0 | 20.0 | 1.99 |
+| 5 | 1, homogeneous | 50 | 0.5 | 95.0 | 81.7 | 25.0 | 2.16 |
 | 5 | 1, homogeneous | 100 | 0.5 | 90.7 | 74.3 | | 2.00 |
-| 2 | 1, homogeneous | 100 | 10 | 21.3 | 8.0 | 9.1 | 1.01 |
-| 5 | 1, homogeneous | 100 | 10 | 87.0 | 69.7 | | 2.00 |
+| 2 | 1, homogeneous | 100 | 10 | 22.3 | 8.3 | 9.2 | 1.10 |
+| 5 | 1, homogeneous | 100 | 10 | 86.7 | 70.3 | | 2.03 |
 
-Findings (400 further replications isolated the causes):
+Findings (400 further replications, run with BIC3 on 2026-10-12, isolated the
+causes):
 
 - **Known or no breaks, and heterogeneous breaks.** The statistic is
   calibrated: with the ADF lag fixed at 0 (the true order), the size of Z in
@@ -189,8 +195,8 @@ Findings (400 further replications isolated the causes):
   part of the residuals, a variance shift in the cumulated errors that moves
   the ADF distribution to the left (a level shift alone moves it by only
   0.1). The infimum over the candidate dates then picks a wrong date (the
-  true date in about 10% of the samples), and BIC3 finds a second factor in
-  the common break spike. Fixing r = 1 and the lags does not remove it (67%).
+  true date in about 10% of the samples), and the factor criterion (BIC3
+  then, IC_p1 now) finds a second factor in the common break spike. Fixing r = 1 and the lags does not remove it (67%).
   So the literal eq. 15 is not robust to large shifts of the cointegrating
   vector; known breaks or heterogeneous estimation (which minimises the SSR
   and finds the true date) have correct size. Documented in
@@ -231,7 +237,49 @@ is GPL-3 and none of its code is used).
   0.25 to 1.05). Z in the trend model is again +9.6 to +11.8 for
   `xtbreakcoint` and -0.5 to 0.8 for ours.
 
-## Not done
+## T9: BCS (2017) Table 16 on rebuilt PWT 6.3 data
 
-- T9 (golden test on the PWT 6.3 panel of BCS 2017, Table 16): the data have
-  not been obtained.
+`Rscript inst/validation/banerjee-pwt.R` (run 2026-10-13 on a release build;
+112 settings in 6 s). The authors' panel was never published, so
+`data-raw/pwt-production.R` rebuilds it from PWT 6.3 (the 18 Nov 2009
+revision). The capital stock comes from an assumed perpetual inventory recipe
+(Eberhardt and Teal 2011: delta = 0.05, initial K/Y = (I/Y)/(g + n + delta)).
+The grid crosses 8 capital series (delta from 0.03 to 0.07, initial K/Y from
+whole-sample or first-decade averages), 7 lag rules (t-sig, BIC, k = 0..4) and
+both kinds of moments.
+
+**Not reproduced.** The best setting matches 1 of the 13 printed Z to two
+decimals (mean absolute difference 0.22, maximum 0.62), and that one match
+looks like chance.
+
+- **The data are the likely cause.** Z at r = 0 involves no factors. With
+  t-sig lags and asymptotic moments it ranges from -2.82 to -3.65 across the
+  capital series alone (Table 16: -3.56), and from -1.90 to -4.28 over the
+  whole grid. The rebuilt series cannot pin down the authors' one.
+- **r1.** MQ_f, and MQ_c on the transformed data, match in every setting.
+  Untransformed, MQ_c at r = 2 gives 2 where the table has 1, for every
+  capital series except one (delta 0.06, first-decade K/Y), which matches all
+  24 entries.
+- **The factor criterion: IC_p1, not BIC3.** BIC3, the default until then,
+  gives 1 with the transformation, as the text says. Without it, BIC3 gives 2
+  for every capital series, where the text says the maximum (6). The cause is
+  not BIC3's code (a plain-R version agrees to 1e-18) and not the data
+  definition: inputs in levels do give 6, but they fit the Z values worse.
+  IC_p1 gives 6 and then 1 for all four whole-sample capital series (6 and 2
+  for three of the four first-decade ones). At its choices, r1 = 6 and r1 = 1,
+  as the text says. It is also what Bai and Ng (2004, p. 1145) use, and the
+  JAE cites that paper for its "panel BIC". The default became IC_p1 on
+  2026-10-13 (plan B4), and T9 now matches both choices. The margins are
+  narrow: IC_p1 adds a factor when it removes more than 17.1% of the
+  remaining variance. Untransformed, factors 2 to 6 remove 17.5% to 18.2%;
+  transformed, 15.1% to 16.7%.
+- **The table's conclusions hold.** With the package defaults every Z rejects
+  at 5% (-2.16 to -3.92), and the MQ tests find every factor I(1).
+- **Open: what "transformed" divides.** The DP's note divides the "y_{i,t}
+  variables" by their standard deviation, while `pca_scale` divides the
+  first-difference residuals (plan B5). The two readings weight the units
+  differently, which could matter for the transformed rows, but they cannot
+  be told apart while the data differ.
+
+As plan Section 11 Q7 specifies, the panel is not shipped in `data/`, and T9
+stays out of testthat.
