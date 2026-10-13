@@ -16,8 +16,18 @@ Rscript -e 'devtools::test()'                     # run all tests
 Rscript -e 'devtools::test(filter = "panel")'     # run one file: tests/testthat/test-panel.R
 Rscript -e 'devtools::check()'                    # full R CMD check (currently 0 errors/warnings/notes)
 Rscript -e 'devtools::load_all()'                 # load package for interactive use (debug build of the Rust code)
-(cd src/rust && cargo test --offline)             # Rust unit tests of src/rust/src/core
 ```
+
+Rust unit tests of `src/rust/src/core`, offline against the vendored crates (`$SCRATCH` is any scratch directory; the vendored crates, `CARGO_HOME` and the build all go there, so nothing is written to the repo or to `~/.cargo`):
+
+```sh
+mkdir -p "$SCRATCH" && tar -xJf src/rust/vendor.tar.xz -C "$SCRATCH"   # unpacks $SCRATCH/vendor
+(cd src/rust && CARGO_HOME="$SCRATCH/cargo-home" cargo test --offline --target-dir "$SCRATCH/target" \
+  --config 'source.crates-io.replace-with="vendored-sources"' \
+  --config "source.vendored-sources.directory=\"$SCRATCH/vendor\"")
+```
+
+A bare `cargo test --offline` only resolves when the crates are already cached in `CARGO_HOME`: the R build unpacks the vendored crates into `src/vendor` and deletes them afterwards.
 
 ### Rust
 
