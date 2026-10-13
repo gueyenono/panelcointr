@@ -100,10 +100,10 @@ test_that("estimated heterogeneous breaks match the naive iteration (T2)", {
   for (cfg in list(list(model = 1, m = 1, K = 1), list(model = 2, m = 2, K = 1),
                    list(model = 4, m = 1, K = 2), list(model = 5, m = 1, K = 1, factors = 1))) {
     df <- sim_panel(N = 5, T = 36, K = cfg$K, seed = cfg$model + 10 * cfg$m)
-    # With N = 5, BIC3 picks r = 4 and the iteration converges slowly; a
+    # With N = 5, IC_p1 picks r = 4 and the iteration converges slowly; a
     # few iterations suffice to compare the paths.
     fit <- suppressWarnings(bcs_fit(df, cfg$K, model = cfg$model, breaks = cfg$m,
-                                    factors = if (is.null(cfg$factors)) "bic3" else cfg$factors,
+                                    factors = if (is.null(cfg$factors)) "ic1" else cfg$factors,
                                     control = bcs_ctl(iter_tol = 1e-8, iter_max = 8)))
     ref <- ref_hetero(ref_bcs_units(df, cfg$K), fit$settings, cfg$m, fit$settings$h,
                       r_fixed = cfg$factors, rmax = fit$settings$max_factors)

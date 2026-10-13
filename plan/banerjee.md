@@ -1,8 +1,9 @@
 # Plan: `pcoint_banerjee()`: Banerjee & Carrion-i-Silvestre (2015) panel cointegration tests with structural breaks and common factors
 
 Status: written 2026-10-12. The open questions were settled the same day: all recommendations
-accepted (§11). Implemented 2026-10-12: P0-P6 (the vignette uses simulated data) and P7 except T9,
-which waits for the PWT data; validation results in `inst/validation/RESULTS.md`. Choices made during
+accepted (§11). Implemented 2026-10-12: P0-P7 (the vignette uses simulated data); validation results in
+`inst/validation/RESULTS.md`. T9 ran on 2026-10-13 on a rebuilt PWT panel and did not reproduce Table 16;
+it led to the switch of the default factor criterion to IC_p1 (B4). Choices made during
 the implementation are B25-B31 (§3). Builds on the infrastructure of
 `pcoint_westerlund()` (`plan/westerlund.md`).
 
@@ -158,8 +159,9 @@ Let `Y*` be the `n × N` matrix `[y*_1 … y*_N]`.
   and `Y*'Y*` (§6.3).
 - **Number of factors.** `r̂ ∈ {0..r_max}` minimises a Bai–Ng (2002) criterion. With μ_j the
   eigenvalues, let `V(k) = (Nn)⁻¹ Σ_{j>k} μ_j` and `σ̂² = V(r_max)`.
-  - **Default BIC3**: `V(k) + k σ̂² (N + n − k) ln(Nn) / (Nn)`.
-  - Also offered: `IC_p1..3` and `PC_p1..3`, with `C²_NT = min(N, n)`.
+  - **Default IC_p1** (B4): `ln V(k) + k ((N + n) / (Nn)) ln(Nn / (N + n))`.
+  - Also offered: `IC_p2..3`, `PC_p1..3`, with `C²_NT = min(N, n)`, and BIC3:
+    `V(k) + k σ̂² (N + n − k) ln(Nn) / (Nn)`.
   - Checked against Bai & Ng (2002), pp. 201–202 (their T is our n). There
     `V(k) = N⁻¹ Σ_i ê_i'ê_i / T`, which equals the eigenvalue sum above, and `σ̂²` "can be replaced
     by `V(kmax)`". The `IC_p` criteria use `ln V(k)` and no `σ̂²`.
@@ -344,7 +346,7 @@ argument.
 | B1 | Which version | JAE 2015 | WP 2006 differs in places | **JAE**; WP only where JAE is silent | e.g. Z*_τ critical values: JAE Table III, not WP Table 11 |
 | B2 | Model numbering | six models (§2) | xtbreakcoint: five different models (App. A) | **paper's 1–6** | `model` is required, as `lags` is in `pcoint_westerlund()`: the choice matters |
 | B3 | First-difference regression | unit by unit (`M_i`) | xtbreakcoint pools δ over units | **unit by unit** | |
-| B4 | Factor-number criterion | "panel BIC in Bai and Ng (2004)" (§5) | WP and BCS 2017: "panel BIC in Bai and Ng (2002)"; xtbreakcoint: IC_p2 | **BIC3 of Bai & Ng (2002), r_max = 6** | BIC3 is the only "BIC" in Bai & Ng (2002) that uses both N and T (p. 202; formula checked, §2.3). Bai & Ng (2004) define no BIC; their simulations use `IC_p1` from the 2002 paper (p. 1145). So "Bai and Ng (2004)" in the JAE is read as a citation slip. Argument `factors` |
+| B4 | Factor-number criterion | "panel BIC in Bai and Ng (2004)" (§5) | WP and BCS 2017: "panel BIC in Bai and Ng (2002)"; xtbreakcoint: IC_p2 | **IC_p1 of Bai & Ng (2002), r_max = 6** (BIC3 until 2026-10-13) | Bai & Ng (2004) define no BIC; their simulations use `IC_p1` (p. 1145), so the JAE's "panel BIC in Bai and Ng (2004)" reads as IC_p1. T9 supports this: on the rebuilt PWT panel, IC_p1 gives r = 6 untransformed and 1 transformed, as BCS (2017, p. 19) report, while BIC3 gives 2 and 1 for every capital series. The IC_p1 margins are narrow (`inst/validation/RESULTS.md`, T9). BIC3, the only "BIC" in Bai & Ng (2002) that uses both N and T (p. 202), stays available. Argument `factors` |
 | B5 | Scaling before PCA | none | BCS 2017 "transformed" (divide by s.d.) | **none** | control `pca_scale` |
 | B6 | ADF lag rule | t-sig; `k_max = 4ceil[min[N,T]/100]^{1/4}` (§5), `12ceil[…]` in §6 | GAUSS port: BIC with k_max = 4 | **t-sig at 10%; `k_max = 4⌈(min(N,T)/100)^{1/4}⌉`** | The printed formula is ambiguous. Readings that apply `ceil` before multiplying by 4 give 4 for every min(N, T) ≤ 100. `⌈4(·)^{1/4}⌉` also gives 4 at the paper's min(N, T) = 40, but 3 below 32; a Schwert-style `⌊4(·)^{1/4}⌋` gives 3 at 40. Control `max_lags`, `lag_criterion = "tsig" / "bic" / "aic"`, `tsig_level` |
 | B7 | ADF selection sample | not stated | each candidate on its own sample | **common sample of `k_max`, refit on own sample** | as Westerlund D7. Control `lag_sample` |
@@ -369,7 +371,7 @@ argument.
 | B26 | Names of the break columns | — | — | **`break_date` (one break), `break_date_1`, `break_date_2`** | `break` is a reserved word in R |
 | B27 | PCA inside the break iteration (§2.8) | not stated | — | **unscaled, even with `pca_scale = TRUE`** | keeps `S` monotone; the final Z uses `pca_scale` |
 | B28 | `mq_level` | 5% | — | **1%, 5% or 10% only** | the levels of the published tables |
-| B29 | Default `r_max` in small panels | 6 | — | **`min(6, min(N, n) − 1)`; an explicit `max_factors` that is too large is an error** | with `r_max = N − 1`, BIC3 tends to pick many factors (σ̂² = V(r_max) is small); documented |
+| B29 | Default `r_max` in small panels | 6 | — | **`min(6, min(N, n) − 1)`; an explicit `max_factors` that is too large is an error** | with `r_max = N − 1`, the criteria tend to pick many factors (for BIC3, σ̂² = V(r_max) is small); documented |
 | B30 | A single `breaks` value of 1 or 2 | — | — | **number of breaks to estimate**, even if 1 or 2 is also a time value; other values are dates | give unit-specific dates as a data frame to place a break after period 1 or 2 |
 | B31 | Bai–Ng Table I misprint (q = 5, detrended, 10%: −55.286) | — | our simulation −52.61 | **kept as printed** | flagged in `R/banerjee-tables.R` and RESULTS.md; affects `mq_level = 0.10` with ≥ 5 factors only |
 
@@ -388,7 +390,7 @@ pcoint_banerjee(
                                # vector of time values: known breaks common to all units
                                # data.frame(id, break) or named list: known unit-specific breaks
   break_type = c("heterogeneous", "homogeneous"),   # estimated breaks only
-  factors = "bic3",            # criterion ("bic3", "ic1".."ic3", "pc1".."pc3") or a fixed number (0 allowed)
+  factors = "ic1",             # criterion ("ic1".."ic3", "pc1".."pc3", "bic3") or a fixed number (0 allowed)
   max_factors = 6L,
   lags = NULL,                 # ADF lags: NULL = t-sig from the k_max rule; scalar fixed; c(min, max)
   dols = 0L,                   # leads and lags of D2 x: scalar (same) or c(lags, leads)
@@ -624,7 +626,7 @@ bit-identical for any `n_threads`.
 | T6 | Input validation | unbalanced panels; dates outside the sample or inside the trimming; Models 3 and 6 with unit-specific or estimated breaks; `breaks = 3` estimated; `max_factors ≥ min(N, n)`; collinear regimes; `break_type` with known breaks | exact messages |
 | T7 | Monte Carlo (`inst/validation/`, not in `R CMD check`) | (a) size of Z under H0 for every model and break regime, BCS §5 DGP with N = 40; (b) Table IV: Models 2 and 5, one estimated common break, r = 1, the grid over σ²_F, φ, ρ and T; (c) Table III critical values (N = 100); (d) MQ selection frequencies against the §5 discussion | within Monte Carlo error |
 | T8 | Information only | `xtbreakcoint` on Models 1 and 2 without breaks, with r and lags fixed; differences are expected (Appendix A) and are documented, not tested | none |
-| T9 | **Golden test, if the data can be obtained** (§11 Q7) | BCS (2017) Table 16: Model 1, no breaks, PWT 6.3, N = 19, T = 57; lag setting unknown (t-sig default first, then fixed k). Z for r = 0..6, with and without `pca_scale`; `r̂_1` from `MQ_c` and `MQ_f`; the BIC3 choice. In `inst/validation/`, and also in testthat if the data ship with the package | Z to the printed 2 decimals; `r̂_1` and BIC3 exact. A mismatch is investigated and documented, not forced |
+| T9 | **Golden test, if the data can be obtained** (§11 Q7) | BCS (2017) Table 16: Model 1, no breaks, PWT 6.3, N = 19, T = 57; lag setting unknown (t-sig default first, then fixed k). Z for r = 0..6, with and without `pca_scale`; `r̂_1` from `MQ_c` and `MQ_f`; the factor-criterion choice. In `inst/validation/`, and also in testthat if the data ship with the package | Z to the printed 2 decimals; `r̂_1` and the criterion choice exact. A mismatch is investigated and documented, not forced |
 
 ---
 
@@ -694,8 +696,9 @@ elsewhere still point here.
    - The targets:
      - Z for fixed r = 0..6, with and without standardisation (`pca_scale`);
      - `r̂_1` from `MQ_c` and `MQ_f`;
-     - BIC3 picking r = 6 without standardisation. With standardisation the DP (p. 19) reports
-       "only one integrated common factor", read as r̂ = 1.
+     - The criterion picking r = 6 without standardisation. With standardisation the DP (p. 19)
+       reports "only one integrated common factor", read as r̂ = 1. (Outcome: IC_p1 gives both,
+       BIC3 does not; see B4.)
    - The work:
      - P6: obtain the data and check the licence. Current PWT releases are CC BY 4.0, but 6.3
        predates that, and the capital series is constructed by the authors; check both.

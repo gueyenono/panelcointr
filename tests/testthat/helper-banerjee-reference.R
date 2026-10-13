@@ -69,7 +69,7 @@ ref_criteria <- function(values, n, N, rmax, crit) {
 
 # Principal components through the n x n Gram matrix (the Rust engine uses
 # the smaller one).
-ref_pca <- function(Y, r = NULL, crit = "bic3", rmax = 6, scale = FALSE) {
+ref_pca <- function(Y, r = NULL, crit = "ic1", rmax = 6, scale = FALSE) {
   n <- nrow(Y)
   N <- ncol(Y)
   sdv <- if (scale) apply(Y, 2, sd) else rep(1, N)
@@ -185,7 +185,7 @@ ref_bcs <- function(units, s, tb_list) {
   dols <- c(s$dols_p, s$dols_q)
   Y <- ref_project(units, s$model, tb_list, dols)
   pc <- ref_pca(Y, r = if (s$factors == "fixed") s$r_fixed else NULL,
-                crit = if (s$factors == "fixed") "bic3" else s$factors,
+                crit = if (s$factors == "fixed") "ic1" else s$factors,
                 rmax = s$max_factors, scale = s$pca_scale)
   adf_args <- list(kmin = s$lag_min, kmax = s$lag_max, rule = s$lag_criterion, cut = s$tsig_cut,
                    sample = s$lag_sample)
@@ -229,7 +229,7 @@ ref_break_search <- function(unit, model, m, h, dols, target = NULL) {
   list(tb = cands[[best]], ssr = ssr[best], all = ssr, cands = cands)
 }
 
-ref_hetero <- function(units, s, m, h, r_fixed = NULL, crit = "bic3", rmax = 6) {
+ref_hetero <- function(units, s, m, h, r_fixed = NULL, crit = "ic1", rmax = 6) {
   dols <- c(s$dols_p, s$dols_q)
   N <- length(units)
   search <- function(C) {

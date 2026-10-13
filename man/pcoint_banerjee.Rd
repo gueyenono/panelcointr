@@ -12,7 +12,7 @@ pcoint_banerjee(
   model,
   breaks = NULL,
   break_type = c("heterogeneous", "homogeneous"),
-  factors = "bic3",
+  factors = "ic1",
   max_factors = 6L,
   lags = NULL,
   dols = 0L,
@@ -40,8 +40,8 @@ from \code{model}.}
 only with \code{breaks = 1} or \code{2}.}
 
 \item{factors}{Number of common factors: a criterion of Bai and Ng (2002),
-\code{"bic3"} (default), \code{"ic1"}, \code{"ic2"}, \code{"ic3"}, \code{"pc1"}, \code{"pc2"} or
-\code{"pc3"}, or a fixed number (0 for none).}
+\code{"ic1"} (default), \code{"ic2"}, \code{"ic3"}, \code{"pc1"}, \code{"pc2"}, \code{"pc3"} or
+\code{"bic3"}, or a fixed number (0 for none).}
 
 \item{max_factors}{Largest number of factors considered by the criterion
 (default 6, as in the paper, lowered to \eqn{\min(N, n) - 1}{min(N, n) - 1}
@@ -104,9 +104,12 @@ For each unit, \eqn{\Delta y_{it}}{Delta y_it} is regressed on the first
 differences of the model's deterministic terms and of the regressors
 (Section 2.2 of the paper). The residuals of all units form an
 \eqn{n \times N}{n x N} matrix from which \eqn{r}{r} common factors are
-estimated by principal components; \eqn{r}{r} is chosen by the BIC3 criterion
-of Bai and Ng (2002) with at most \code{max_factors} factors unless it is
-fixed. The defactored residuals are cumulated and each unit's ADF
+estimated by principal components; \eqn{r}{r} is chosen by the IC_p1
+criterion of Bai and Ng (2002) with at most \code{max_factors} factors unless
+it is fixed. IC_p1 is the criterion of Bai and Ng (2004), which the paper
+cites for its "panel BIC", and it reproduces the factor choices that
+Banerjee and Carrion-i-Silvestre (2017) report for their production
+function data. The defactored residuals are cumulated and each unit's ADF
 t-ratio \eqn{t_i}{t_i} is computed from a regression without
 deterministic terms. The panel statistic is
 \deqn{Z = \sqrt{N} (\bar t - \Theta) / \sqrt{\Psi},}{Z = sqrt(N) (tbar - Theta) / sqrt(Psi),}
@@ -213,6 +216,10 @@ panel data with structural breaks and cross-section dependence.
 Banerjee, A. and Carrion-i-Silvestre, J. L. (2006). Cointegration in
 panel data with breaks and cross-section dependence. ECB Working Paper
 591.
+
+Banerjee, A. and Carrion-i-Silvestre, J. L. (2017). Testing for panel
+cointegration using common correlated effects estimators. Birmingham
+Business School Discussion Paper 2017-02.
 
 Bai, J. and Ng, S. (2002). Determining the number of factors in
 approximate factor models. \emph{Econometrica} 70(1), 191-221.

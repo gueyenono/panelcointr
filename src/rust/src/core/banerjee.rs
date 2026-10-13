@@ -133,7 +133,7 @@ pub fn factor_step(y: &[f64], n: usize, nn: usize, opts: &Options) -> Result<Fac
     let ge = factors::gram_eigen(ys, n, nn)?;
     let crit = match opts.factors {
         Factors::Select(c) => c,
-        Factors::Fixed(_) => Criterion::Bic3,
+        Factors::Fixed(_) => Criterion::Ic1,
     };
     let criteria = factors::criteria(&ge.values, n, nn, opts.r_max, crit);
     let r = match opts.factors {
