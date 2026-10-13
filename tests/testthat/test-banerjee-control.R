@@ -1,0 +1,26 @@
+test_that("banerjee_control() validates its arguments", {
+  ctl <- banerjee_control()
+  expect_s3_class(ctl, "banerjee_control")
+  expect_equal(ctl$lag_criterion, "tsig")
+  expect_equal(ctl$sim_reps, 100000L)
+  expect_null(ctl$max_lags)
+  expect_error(banerjee_control(lag_criterion = "hq"), "should be one of")
+  expect_error(banerjee_control(tsig_level = 1.2), "between 0 and 1")
+  expect_error(banerjee_control(mq_level = 0.2), "0.01, 0.05 or 0.10")
+  expect_error(banerjee_control(max_lags = -1), "whole number")
+  expect_error(banerjee_control(pca_scale = NA), "TRUE or FALSE")
+  expect_output(print(banerjee_control(max_lags = 3)), "max_lags: 3")
+})
+
+test_that("the default lag and MQ rules follow the paper", {
+  df <- sim_panel(N = 6, T = 40, K = 1, seed = 1)
+  fit <- pcoint_banerjee(y ~ x1, data = df, model = 1)
+  expect_equal(fit$settings$lags, c(0L, 4L))
+  expect_equal(fit$settings$mq_bandwidth, 4L)
+  expect_equal(fit$settings$mq_max_var, 4L)
+  expect_equal(fit$settings$tsig_cut, qnorm(0.95))
+  fit <- pcoint_banerjee(y ~ x1, data = df, model = 1, lags = 2,
+                         control = banerjee_control(max_lags = 1))
+  expect_equal(fit$settings$lags, c(2L, 2L))
+  expect_true(all(fit$units$lags == 2L))
+})

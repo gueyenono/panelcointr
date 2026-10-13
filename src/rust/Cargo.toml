@@ -1,0 +1,27 @@
+[package]
+name = 'panelcointr'
+publish = false
+version = '0.1.0'
+edition = '2021'
+# Minimum supported Rust version (MSRV). It must cover the whole dependency
+# tree: resolve with `CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo
+# update` and keep Cargo.lock at `version = 3` (see CLAUDE.md, Rust).
+rust-version = '1.71'
+
+[lib]
+# rlib is needed by the `document` binary (wrapper generation) and `cargo test`.
+crate-type = ['rlib', 'staticlib']
+name = 'panelcointr'
+
+[[bin]]
+name = 'document'
+path = 'document.rs'
+
+[dependencies]
+extendr-api = '0.9'
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+# Keep the default `panic = "unwind"` so extendr can turn panics into R errors.

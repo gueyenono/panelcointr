@@ -1,0 +1,186 @@
+---
+title: "Error-correction panel cointegration tests (Westerlund 2007)"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Error-correction panel cointegration tests (Westerlund 2007)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r setup}
+library(panelcointr)
+```
+
+## The tests
+
+Westerlund (2007) tests the null hypothesis of no cointegration by asking
+whether the error-correction term of a conditional error-correction model
+is zero. For each unit $i$,
+
+$$
+\Delta y_{it} = \delta_i' d_t + \alpha_i y_{i,t-1} + \lambda_i' x_{i,t-1}
+  + \sum_{j=1}^{p_i} \alpha_{ij} \Delta y_{i,t-j}
+  + \sum_{j=-q_i}^{p_i} \gamma_{ij}' \Delta x_{i,t-j} + e_{it},
+$$
+
+and the null is $\alpha_i = 0$ for all $i$. Unlike residual-based tests,
+this does not impose a common-factor restriction, which can cost them a
+lot of power.
+
+There are four statistics. The group-mean statistics $G_\tau$ (`Gt`) and
+$G_\alpha$ (`Ga`) average unit-level t-ratios and coefficients and test
+against $\alpha_i < 0$ for at least one unit. The panel statistics
+$P_\tau$ (`Pt`) and $P_\alpha$ (`Pa`) pool the information on a common
+$\alpha$ and test against $\alpha_i = \alpha < 0$ for all units. All four
+are left-tailed. Asymptotic p-values come from the moments of the paper's
+Table 1; bootstrap p-values are robust to cross-sectional dependence.
+
+## Health care expenditure and GDP
+
+The `hce` data are the paper's application: per-capita health care
+expenditure and GDP for 20 OECD countries, 1970 to 2001.
+
+```{r}
+str(hce)
+```
+
+Both series trend, so the model has a constant and a trend. With lags and
+leads chosen by AIC between 1 and 3 and between 0 and 3, and the default
+bandwidth $\lfloor 4 (T/100)^{2/9} \rfloor = 3$:
+
+```{r}
+fit <- pcoint_westerlund(loghex ~ loggdp, data = hce, index = c("ctr", "year"),
+                         deterministic = "trend", lags = c(1, 3), leads = c(0, 3))
+fit
+```
+
+All four tests reject the null of no cointegration at the 5% level with
+the asymptotic p-values.
+
+## Reproducing Stata's xtwest
+
+The defaults follow the paper. The Stata command `xtwest` (Persyn and
+Westerlund 2008) departs from it in several places, for example by
+normalising $G_\alpha$ with the residual degrees of freedom, using the
+average lag length for the panel statistics, and comparing information
+criteria across samples of different sizes. `compat = "xtwest"` reproduces
+it, and `compat = "xtwest_westerlund"` reproduces its `westerlund` option.
+The three calls of Persyn and Westerlund (2008) give their published
+output:
+
+```{r}
+runs <- list(
+  list(lags = 1, leads = 1, lrwindow = 3, compat = "xtwest"),
+  list(lags = c(1, 2), leads = c(0, 1), lrwindow = 2, compat = "xtwest"),
+  list(lags = c(1, 3), leads = c(0, 3), lrwindow = 3, compat = "xtwest_westerlund")
+)
+published <- rbind(c(-2.681, -10.927, -12.035, -10.524),
+                   c(-2.736, -11.254, -12.859, -11.773),
+                   c(-4.082, -27.702, -12.969, -22.470))
+ours <- t(sapply(runs, function(a) {
+  r <- do.call(pcoint_westerlund,
+               c(list(loghex ~ loggdp, data = hce, index = c("ctr", "year"),
+                      deterministic = "trend"), a))
+  r$statistics$value
+}))
+colnames(published) <- colnames(ours) <- c("Gt", "Ga", "Pt", "Pa")
+knitr::kable(cbind(run = 1:3, round(ours, 3)), caption = "panelcointr")
+knitr::kable(cbind(run = 1:3, published), caption = "Published xtwest output")
+```
+
+The only difference is in the last digit of Ga in the second call. The
+value is -11.2535, which `xtwest` prints as -11.254 because Stata stores
+its intermediate variables in single precision.
+
+The third call also matches the z-values of the paper's Table 7
+(-9.613, -10.626, -4.100, -10.119), which were computed with the moments
+hard-coded in `xtwest`'s `westerlund` option:
+
+```{r}
+r3 <- pcoint_westerlund(loghex ~ loggdp, data = hce, index = c("ctr", "year"),
+                        deterministic = "trend", lags = c(1, 3), leads = c(0, 3),
+                        lrwindow = 3, compat = "xtwest_westerlund")
+round(r3$statistics$z, 3)
+```
+
+`?westerlund_control` lists every difference and lets you switch each one
+on its own. For example, `xtwest` compares the information criterion of
+each lag order on that order's own sample. The choice then depends on the
+units of `y`: multiplying `loghex` by 3 changes `xtwest`'s selected
+orders, while the default comparison on a common sample does not.
+
+```{r}
+hce3 <- transform(hce, loghex = 3 * loghex)
+avg_orders <- function(data, ...) {
+  r <- pcoint_westerlund(loghex ~ loggdp, data = data, index = c("ctr", "year"),
+                         deterministic = "trend", lags = c(1, 2), leads = c(0, 1),
+                         lrwindow = 2, ...)
+  c(lags = mean(r$units$lags), leads = mean(r$units$leads))
+}
+rbind(xtwest = avg_orders(hce, compat = "xtwest"),
+      xtwest_rescaled = avg_orders(hce3, compat = "xtwest"),
+      default = avg_orders(hce),
+      default_rescaled = avg_orders(hce3))
+```
+
+## Bootstrap p-values
+
+The asymptotic p-values assume that the units are cross-sectionally
+independent, which is doubtful for OECD aggregates. The bootstrap of the
+paper's Section 5 resamples whole periods (the same periods for all
+units) from the null-imposed residuals, which preserves any
+cross-sectional dependence. The indices are drawn with R's random number
+generator, so `set.seed()` makes the results reproducible whatever the
+number of threads.
+
+```{r}
+set.seed(2007)
+fit_boot <- pcoint_westerlund(loghex ~ loggdp, data = hce, index = c("ctr", "year"),
+                              deterministic = "trend", lags = c(1, 3), leads = c(0, 3),
+                              bootstrap = 499, n_threads = 2)
+fit_boot
+```
+
+The bootstrap p-values are much larger than the asymptotic ones. With
+$T = 32$, up to three lags and leads chosen by AIC, and cross-sectionally
+dependent data, the null distributions are far to the left of their
+asymptotic counterparts (compare the bootstrap critical values in
+`summary()` below), and the evidence of cointegration is much weaker. The
+paper's Table 7 reports bootstrap rejections. Those use Westerlund's
+original settings, which `compat = "xtwest_westerlund"` reproduces, and
+the original bootstrap code, which differs from the one here in its
+initialisation, centring and lag selection. Its bootstrap p-values cannot
+be reproduced exactly. `plot()` shows the bootstrap distributions:
+
+```{r, fig.width = 7, fig.height = 5}
+plot(fit_boot)
+```
+
+## Unit-level results
+
+`summary()` adds the bootstrap critical values, the distribution of the
+selected orders, the mean-group error-correction model and the unit-level
+results:
+
+```{r}
+summary(fit_boot)
+```
+
+The `units` element holds the unit-level estimates, and `coefficients`
+holds each unit's full error-correction model:
+
+```{r}
+head(fit$units)
+```
+
+## References
+
+Persyn, D. and Westerlund, J. (2008). Error-correction-based cointegration
+tests for panel data. *Stata Journal* 8(2), 232-241.
+
+Westerlund, J. (2007). Testing for error correction in panel data.
+*Oxford Bulletin of Economics and Statistics* 69(6), 709-748.

@@ -1,6 +1,9 @@
 # Plan: `pcoint_westerlund()`: Westerlund (2007) error-correction panel cointegration tests
 
-Status: plan, not yet implemented. Written 2026-10-11.
+Status: implemented (phases P0 to P7) on 2026-10-11, except the win-builder/rhub runs of P7;
+see §13 for what changed from the plan. Written 2026-10-11; reviewed the same day against the
+paper, `xtwest.ado`, crates.io and CRAN's Rust policy (changes: D8 default, new D19, bootstrap
+details, nested IC grid, thread scope, MSRV handling, T2/T4).
 
 ## 0. Summary
 
@@ -104,9 +107,12 @@ LRV(v; M) = (1/n) [ Σ_t v_t² + 2 Σ_{j=1..M} (1 − j/(M+1)) Σ_t v_t v_{t-j} 
 The sums run over the available pairs and `n` is the number of available observations. No
 demeaning is done inside the estimator; this is `xtwest`'s `lrvar …, weighted nodemean`.
 
-- `ω̂²_yi = LRV(Δy*_i)` over all available `t = 2..T_i`. `Δy*` is `Δy` with its implied
-  deterministic part removed (decision D8): unchanged in Cases 1 and 2, demeaned in Case 3.
-- `ω̂²_ui = LRV(û_i)` over `S_i`.
+- `ω̂²_yi = LRV(Δy*_i)` over all available `t = 2..T_i`. `Δy*` is the residual of `Δy` regressed
+  on `d_t` (paper §3.1, third remark; decision D8): unchanged in Case 1, demeaned in Case 2,
+  detrended in Case 3. `ω̂²_yi` does not depend on `(p, q)`, so it is computed once per unit
+  (except under `xtwest_westerlund`, whose `ω̂_y` uses the estimation sample, Q7).
+- `ω̂²_ui = LRV(û_i)` over `S_i`, with `û_i` demeaned when `d_t` contains a constant (Cases 2
+  and 3; decision D19, our extension).
 - `α̂_i(1) = ω̂_ui / ω̂_yi`, the semiparametric estimator of the paper.
 
 ### 2.4 Statistics
@@ -151,23 +157,38 @@ still works. A validation script regenerates Table 1 by simulation to confirm th
 `lags` and `leads` are each either a scalar (fixed) or a `c(min, max)` range. If either is a range,
 each unit's `(p_i, q_i)` is chosen over the grid by an information criterion. Default: AIC,
 `n log(RSS/n) + 2k`, or BIC `n log(RSS/n) + k log n`, computed on the **common sample**
-`S_i(p_max, q_max)` (Ng & Perron 2005). Ties go to the smaller model. The chosen model is then
-refitted on its own full sample `S_i(p_i, q_i)`.
+`S_i(p_max, q_max)` (Ng & Perron 2005). Ties go to the smaller model; to make that exact (Rust and
+the R oracle must agree), candidates are visited with `p` ascending, then `q` ascending, and a
+candidate replaces the incumbent only if its IC is strictly lower. The chosen model is then refitted
+on its own full sample `S_i(p_i, q_i)`.
 
 ### 2.7 Bootstrap (paper §5, extended to leads)
 
 1. **Null-imposed first stage.** For each i, with its selected `(p_i, q_i)`, regress
    `Δy_it` on `Δy_{t-1..t-p_i}` and `Δx_{t+q_i..t-p_i}`, adding a constant in Case 3 only (paper §5).
    This gives `α̂_ij`, `γ̂_ij` and residuals `ê_it`.
-2. **Joint residual vector.** On the periods `𝒯` where every unit has a residual, form
-   `w_t = (ê_1t..ê_Nt, Δx_1t'..Δx_Nt')`. Centre it by its mean over `𝒯`.
+2. **Joint residual vector.** On the calendar periods `𝒯` where every unit has a residual, form
+   `w_t = (ê_1t..ê_Nt, Δx_1t'..Δx_Nt')`. Centre it by its mean over `𝒯`. In unbalanced panels `𝒯`
+   can be much shorter than any `T_i`: error if `|𝒯|` is below `min_boot_periods` (control,
+   default 10), and warn if it is under half of the median `T_i`.
 3. **Resample common time indices.** Draw them with replacement (the same index for all units),
    which preserves cross-sectional dependence and cross-unit endogeneity. **The indices are drawn in
    R** (`sample.int`), so `set.seed()` gives reproducible results whatever the thread count.
 4. **Generate the bootstrap panel.**
    `u*_it = e*_it + Σ_{j=−q_i..p_i} γ̂_ij'Δx*_i,t−j`, then
    `Δy*_it = Σ_j α̂_ij Δy*_i,t−j + u*_it`, started at zero, with the first `burn` values discarded.
-   `y* = cumsum(Δy*)` and `x* = cumsum(Δx*)`. Unit i keeps `T_i` observations.
+   - Each replicate draws `L = burn + T_span + q_max` indices, where `T_span` is the length of the
+     calendar range of the panel. The extra `q_max` supply the lead `Δx*` that `u*` needs in the
+     last periods; lagged `Δx*` before the first draw are zero and washed out by the burn-in.
+   - Unit i takes the kept periods that match its own calendar window, so the overlap pattern of an
+     unbalanced panel is preserved.
+   - `y*` and `x*` are cumulative sums over the unit's kept periods only (`y*_i0 = x*_i0 = 0`,
+     as in the paper). This matters in Case 1, where levels enter without a constant.
+   - In Case 3 the first-stage constant is not added back: the four statistics are invariant to a
+     linear trend in `y` and `x` in Case 3 (D19, T4), so a driftless `(y*, x*)` gives the same
+     bootstrap distribution as the drifting data would. The compat presets lack that invariance
+     (`û` is not demeaned, and under `"none"` neither is `Δy`), so their bootstrap is only
+     approximate when the data drift. This is documented, not corrected.
 5. **Recompute.** Compute Gt, Ga, Pt and Pa on `(y*, x*)` with the same settings. By default the
    lags and leads are re-selected in each replicate (control `boot_reselect`).
 6. **p-values.** `p*_s = (1 + #{S*_b ≤ S}) / (B + 1)`. Also report the bootstrap 1%, 5% and 10%
@@ -189,8 +210,8 @@ conventions). Individual choices can be overridden through `westerlund_control()
 | D4 | `SE(α̂_i)` | "conventional" | df-corrected (`westerlund`: RSS/n) | **df-corrected** | |
 | D5 | `σ̂_i` in `S_i` | regression s.e. of unit i | df from the mean T for all units (Q4) | **own df** | identical in balanced panels with fixed lags |
 | D6 | Averaging in Ga | simple mean over i | row-weighted, i.e. weighted by `T_i` (Q3) | **simple mean** | identical in balanced panels |
-| D7 | Information criterion | AIC (sample unspecified) | Stata AIC, each candidate on its own sample; ties go to the larger model (Q5) | **AIC/BIC on the common sample; ties go to the smaller model** | comparing ICs across different samples is a known flaw (Ng & Perron 2005) |
-| D8 | Deterministics removed from Δy for `ω̂_y` | "residuals of Δy on `d_t`" | demean in Case 3 only (Q7) | **implied by the model: demean in Case 3 only** | Under the model Δy has a drift only in Case 3, so detrending Δy removes a term it does not have. Control: `lrv_deterministics = c("implied","regression")` |
+| D7 | Information criterion | AIC (sample unspecified) | Stata AIC, each candidate on its own sample; ties go to the larger model (Q5) | **AIC/BIC on the common sample; ties go to the smaller model** | Comparing ICs across different samples is a known flaw (Ng & Perron 2005). It also makes the selection depend on the units of `y`: `n log(RSS/n)` shifts by `2n log c` when `y` is scaled by `c`, and `n` differs across candidates. On SJ run 2, multiplying `y` by 3 changes xtwest's mean lags and leads from 1.15/0.05 to 1.20/0.20, and Gt from −2.736 to −2.843. On a common sample the shift is the same for every candidate |
+| D8 | Deterministics removed from Δy for `ω̂_y` | "residuals of Δy on `d_t`" (§3.1, third remark) | demean in Case 3 only (Q7); `westerlund`: none | **paper: regress on `d_t`** | Asymptotically irrelevant: under eq. (1) Δy has a drift only in Case 3, so "implied" removes exactly that, but the text is explicit. Control: `lrv_deterministics = c("regression","implied","none")` |
 | D9 | Sample for `ω̂_u` | `S_i` | `S_i` plus the last `q` rows (Q8) | **`S_i`** | |
 | D10 | Bootstrap first-stage deterministics | constant in Case 3 only | user's `d_t` (Q10) | **paper** | |
 | D11 | Bootstrap lag orders | `p_i` | re-selected on the null regression (Q10) | **`(p_i, q_i)` from the test regression** | |
@@ -201,6 +222,7 @@ conventions). Individual choices can be overridden through `westerlund_control()
 | D16 | Deterministic default | n/a | none (Case 1) | **`"constant"`** | paper Remark 4: Case 1 is inconsistent against cointegration with a constant |
 | D17 | Moments | Table 1 | Table 1; separate legacy moments with `westerlund` (Q13) | **Table 1** | legacy moments only under `compat = "xtwest_westerlund"` |
 | D18 | Trend regressor | `t` | raw time variable (tests), `_n` (bootstrap) (Q9) | **`t = 1..T_i`** | numerically irrelevant: a trend always comes with a constant |
+| D19 | Mean of `û` in `ω̂_u` | not addressed: under eq. (2) `x` has no drift, so `û` has mean zero | not removed | **demean `û` when `d_t` has a constant** | With drifting `x` (log GDP drifts 2.2% a year in `xtwestdata`), `û = Σγ̂'Δx + ê` has mean `γ̂(1)'E(Δx)`. The undemeaned Bartlett LRV then adds about `(M+1)·mean²`, which inflates `α̂_i(1)` and grows with `M`. Demeaning makes Case 3 exactly invariant to linear trends in `y` and `x`. Checked with the prototype at fixed lags: without it, a steeper `x` drift moves Ga, Pt and Pa by up to 3.9; with it, by < 1e-12. On SJ run 1, with everything else as in xtwest except the `S_i` sample (D9), it moves Ga from −11.19 to −12.89 and Pa from −10.70 to −12.25. Control: `demean_u = TRUE`, `FALSE` in the compat presets. See open question 5 |
 
 `compat` applies to the statistics. It cannot reproduce `xtwest`'s bootstrap draws (different RNG),
 and it does not reproduce `xtwest`'s bootstrap bugs (Q10). With `compat` set, the bootstrap uses our
@@ -230,11 +252,13 @@ westerlund_control(
   t_norm = NULL,               # "effective" | "df" | "T"
   panel_lags = NULL,           # "individual" | "mean"
   ic_sample = NULL,            # "common" | "varying"
-  lrv_deterministics = NULL,   # "implied" | "regression"
+  lrv_deterministics = NULL,   # "regression" | "implied" | "none"
+  demean_u = NULL,             # TRUE | FALSE (D19)
   boot_reselect = NULL,        # TRUE | FALSE
   boot_burn = NULL,            # integer
   boot_pvalue = NULL,          # "plus_one" | "xtwest"
   boot_chunk = 100L,           # replications per Rust call (interrupt and progress granularity)
+  min_boot_periods = 10L,      # minimum common periods |𝒯| for the bootstrap
   min_df = 1L,                 # minimum n_i − k_i per unit
   keep_boot = TRUE             # keep the B × 4 matrix of bootstrap statistics
 )
@@ -298,7 +322,8 @@ R  pcoint_westerlund()
    ├─ resolve_settings()   compat preset + control + defaults → typed list
    ├─ westerlund_rs()      ── Rust: per-unit fits, selection, LRVs, Gt/Ga/Pt/Pa, unit table
    ├─ (bootstrap > 0)
-   │    westerlund_boot_prepare_rs()  ── Rust: null-imposed first stage, centred w_t, valid periods
+   │    state <- westerlund_boot_prepare_rs()  ── Rust: null-imposed first stage, centred w_t,
+   │                                              valid periods; returned as ExternalPtr<BootState>
    │    loop over chunks:
    │       idx <- matrix(sample.int(...), chunk, L)   (R RNG)
    │       westerlund_boot_rs(state, idx, n_threads)  ── Rust: chunk × 4 statistics
@@ -320,8 +345,12 @@ R  pcoint_westerlund()
 - `y`: `f64` vector of length `Σ T_i`.
 - `X`: `Σ T_i × K` column-major R matrix, read in Rust as K strided slices.
 - `offsets`: integer vector of length `N + 1`.
-- Per-unit integer vectors: `p_min`, `p_max`, `q_min`, `q_max`, `M_i`.
+- Per-unit integer vectors: `p_min`, `p_max`, `q_min`, `q_max`, `M_i`, and `start` (calendar
+  position of the unit's first period, for the bootstrap's common time axis).
 - A named settings list, parsed into a Rust struct.
+
+The wrappers copy the inputs into owned `Vec<f64>` on entry. The copy is negligible next to the
+computation, and it means worker threads never hold pointers into R-managed memory.
 
 Rust returns a named list of plain vectors and matrices. No R objects are created inside the numeric
 core.
@@ -335,13 +364,15 @@ core.
 | | extendr 0.9 / rextendr 0.5 | savvy 0.11 |
 |---|---|---|
 | R-side tooling | `rextendr::use_extendr()`, `use_cran_defaults()`, `vendor_pkgs()`, `document()`, `use_msrv()` | `savvy-cli` (Rust-side) |
-| MSRV | 1.71 | 1.81 |
+| MSRV (crates.io `rust_version`, checked 2026-10-11) | 1.71 (`extendr-api` 0.9.0) | 1.81 (`savvy` 0.11.0) |
 | Errors | `Result<T>` → R error; panics caught | `Result` only (no panics), explicit |
 | Footprint | larger (libR-sys) | smaller |
 
 **Recommendation: extendr.** It has the R-native workflow (devtools-style, CRAN templates and
-vendoring from R), the lower MSRV (CRAN asks for testing against a cargo at least two years old),
-and the larger body of CRAN examples. Our FFI surface is small (vectors in, a list out), so a later
+vendoring from R), the lower MSRV, and the larger body of CRAN examples. On the MSRV: CRAN asks
+for testing with a cargo "at least two years old, and preferably one four or more years old".
+In October 2026 that means about 1.82, preferably about 1.65. Both frameworks meet the minimum,
+but only extendr comes close to the preferred age. Our FFI surface is small (vectors in, a list out), so a later
 switch to savvy would be cheap if it were ever needed.
 
 **No linear-algebra crate.** The regressions are tiny (n ≈ 20–500, k ≈ 5–40), and a
@@ -384,13 +415,20 @@ so extendr can turn panics into R errors.
    `xtwest` runs three regressions per unit for this; we run one. Only the compat mode with
    `panel_lags = "mean"` needs a second QR, at `(p̄, q̄)`.
 
-2. **IC grid on the common sample through Gram sub-blocks.**
+2. **IC grid on the common sample through nested Gram sub-blocks.**
    - Build the design once for `(p_max, q_max)` on `S_i(p_max, q_max)`.
-   - Standardise the columns, then form `G = Z'Z` and `g = Z'Δy` once.
-   - Each candidate `(p, q)` is a column subset. Its Cholesky gives
-     `RSS = Δy'Δy − ‖L⁻¹g_S‖²` in `O(k³/3)`, instead of an `O(n k²)` QR on fresh data.
+   - Standardise the columns, then form `G = Z'Z` and `g = Z'Δy` once (`O(n k²)`, the only pass
+     over the data).
+   - **Nesting.** For a fixed lead order `q`, order the columns as
+     `[d, x_{t-1}, y_{t-1}, Δx_t, Δx_{t+1..t+q}, (Δy_{t-1}, Δx_{t-1}), …, (Δy_{t-p_max}, Δx_{t-p_max})]`.
+     Every model `(p, q)` is then a leading block. The Cholesky factor of a leading block is the
+     leading block of the factor. So **one** Cholesky of that `q`'s sub-block plus one forward
+     solve `v = L⁻¹g` give `RSS(p, q) = Δy'Δy − Σ_{j ≤ k(p,q)} v_j²` for every `p` at once.
+   - Grid cost: `min(|P|, |Q|)` factorisations of `O(k³/3)` each, instead of `|P|·|Q|` (nest
+     whichever dimension is longer), and instead of `|P|·|Q|` QRs of `O(n k²)` on fresh data.
    - Fall back to QR if a sub-block is not positive definite.
-   - Refit the winner by QR on its own sample.
+   - Refit the winner by QR on its own sample (`y_{t-1}` last; item 1). The column order above is
+     only for selection.
 
    With `compat = "xtwest"` (varying samples), each candidate gets its own QR.
 
@@ -401,9 +439,18 @@ so extendr can turn panics into R errors.
    - Replicates are split into contiguous blocks, and each block writes to its own rows of the
      output. Because the indices are pre-drawn, the results are bit-identical for any `n_threads`.
    - R calls Rust in chunks (`boot_chunk`) so it can check for interrupts and show progress.
-     Worker threads never touch the R API.
+     Worker threads never touch the R API. The prepared state (first-stage coefficients, centred
+     `w_t`, layout) lives in an `ExternalPtr<BootState>`, so it is built once, not once per chunk.
+   - Errors inside a worker are returned as `Result` values and turned into an R error on the main
+     thread after the scope joins. A panic propagates through the join and is caught by extendr.
 
-5. **Numerical safety.**
+5. **Deferred optimisation (only if profiling says so).** For large `T`, forming `G` dominates.
+   Lagged columns are shifts of the same few series, so the entries of `G` for each pair of
+   series and each lag difference are one sum plus boundary corrections. That builds `G` in about
+   `O(n (K+1)² (p_max + q_max))` instead of `O(n k²)`. It is not part of the first implementation:
+   it is easy to get wrong, and the plain version may already meet §9.
+
+6. **Numerical safety.**
    - Rank deficiency is detected with a tolerance relative to `max |R_jj|`. It is reported as an
      error naming the unit and the model, never as a silent `NA`.
    - Non-finite LRVs, or `ω̂²_y ≤ 0`, are reported per unit.
@@ -411,7 +458,9 @@ so extendr can turn panics into R errors.
 ### 6.4 Threads
 
 `n_threads` defaults to `getOption("panelcointr.threads", 1L)`. Examples, tests and vignettes use at
-most 2 (CRAN policy). Only the bootstrap and multi-unit fitting are parallelised.
+most 2 (CRAN policy). **Only the bootstrap replicate loop is parallelised.** The main fit takes
+milliseconds even for large panels (§9), so threading it would add code and spawn overhead for no
+measurable gain. Within a replicate, units are processed sequentially.
 
 ---
 
@@ -434,8 +483,21 @@ most 2 (CRAN policy). Only the bootstrap and multi-unit fitting are parallelised
   - **Authorship and copyright of vendored crates** go in DESCRIPTION, as a
     `person("Authors of the dependency Rust crates", role = "cph", comment = "see inst/AUTHORS")`
     entry, with `inst/AUTHORS` generated by `rextendr::write_license_note()`.
-  - Test against a rustc at least two years old. In practice the MSRV is ≤ 1.75 (extendr needs
-    1.71), checked in CI with `rustup toolchain install <MSRV>`.
+  - Test with a cargo/rustc at least two years old, preferably four (§6.1). Target MSRV: 1.71
+    (extendr's) unless a dependency forces higher, and never above about 1.82.
+  - **The MSRV covers the whole dependency tree, not just extendr.** The latest versions of
+    transitive crates (`proc-macro2`, `syn`, …) often need a newer rustc, and a vendored tree
+    resolved with today's cargo will silently exceed 1.71. So:
+    - Set `rust-version` in `Cargo.toml`.
+    - Resolve with the MSRV-aware resolver:
+      `CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo update` (cargo ≥ 1.84). This
+      picks the newest versions whose `rust-version` fits, and is set as an environment variable
+      at development time so nothing new ships in `.cargo/config.toml`.
+    - Commit `Cargo.lock` and check it is lockfile `version = 3`: cargo < 1.78 cannot read v4.
+      Then vendor from that lockfile.
+    - Build with the MSRV toolchain (locally via fenix, §7 Local environment; in CI via
+      `rustup toolchain install <MSRV>`).
+  - Use Rust edition 2021: edition 2024 needs rustc 1.85.
 - **Installed size**: build artefacts (`target/`) are removed after linking, and `src/rust/target`
   and `src/rust/vendor` are listed in `.Rbuildignore`.
 - **Windows**: the `x86_64-pc-windows-gnu` target is needed (via rustup), and the Rtools linker
@@ -466,9 +528,9 @@ most 2 (CRAN policy). Only the bootstrap and multi-unit fitting are parallelised
 | ID | What | How | Tolerance |
 |---|---|---|---|
 | T1 | **Golden tests vs published xtwest** | the three SJ runs (§0) with `compat = "xtwest"` and `"xtwest_westerlund"`; statistics, z, average lags/leads | 1e-3 abs (printed precision; Stata stores temporaries as float, Q14) |
-| T2 | **Rust vs pure-R oracle** | `tests/testthat/helper-reference.R`, ported from `plan/westerlund-prototype.R` and extended to the default variant; random panels over case × K ∈ {1,2,3} × fixed/IC × balanced/unbalanced × compat | 1e-10 relative |
+| T2 | **Rust vs pure-R oracle** | `tests/testthat/helper-reference.R`, ported from `plan/westerlund-prototype.R` and extended to the default variant; random panels over case × K ∈ {1,2,3} × fixed/IC × balanced/unbalanced × compat. The Rust IC uses Gram-Cholesky and the oracle uses QR, so a near-tie can flip a selection: the test generator discards panels whose two best ICs are within 1e-8 (relative) | 1e-10 relative |
 | T3 | Kernels | QR least squares vs `lm.fit` (including near-collinear designs); LRV vs the direct formula; Gram-Cholesky IC selection vs brute-force QR; `cargo test` for linalg and lrv | 1e-12 |
-| T4 | Invariances | trend coding (`t` vs `year`); scaling of y and x (Gt, Pt unchanged); permutation of units; shifting y by a constant in Cases 2 and 3 | 1e-10 |
+| T4 | Invariances | all four statistics, fixed lags and IC (common sample): rescaling y and x separately; permutation of units; adding constants to y and x in Cases 2 and 3; adding linear trends to y and x in Case 3 (needs D19); trend coding (`t` vs `year`, not under `xtwest_westerlund`, Q6). The scaling check is also a regression test for D7: it fails under `ic_sample = "varying"` | 1e-10 |
 | T5 | Bootstrap mechanics | same `set.seed` gives identical results; `n_threads` 1 vs 2 identical; `boot_reselect` on/off; unbalanced overlap handling | exact |
 | T6 | Input validation | gaps, interior NA, short units (message lists them), K > 6 (NA asymptotic p with a warning), `pdata.frame` index, factor/Date time | exact messages |
 | T7 | Monte Carlo (not run in `R CMD check`; `inst/validation/`) | (a) size for the paper's Table 2 designs (Case 1, N ∈ {10,20}, T ∈ {100,200}, φ, γ); (b) bootstrap size under cross-sectional dependence (Table 5, `b ∈ {0,1}`); (c) regenerate Table 1 moments (T = 1000, 10k draws) | within Monte Carlo error |
@@ -521,6 +583,15 @@ Each phase ends with `devtools::check()` clean.
    `xtwest`-identical defaults, so Stata users see the same numbers.
 3. **Is CRAN the target?** I've assumed yes, which drives the vendoring, MSRV and thread work.
 4. **extendr or savvy?** **Recommendation:** extendr (§6.1).
+5. **Demean `û` (D19)?** This departs from both the paper's literal procedure and `xtwest`, and it
+   moves the SJ example's Ga by about 1.7. The paper's theory assumes driftless regressors, where
+   it makes no difference; with drifting regressors, it is what makes the trend case invariant.
+   **Recommendation:** on by default, documented, `demean_u = FALSE` to turn it off. The
+   alternative is the literal procedure by default, with D19 opt-in.
+6. **Cross-sectional demeaning?** Paper §5 mentions subtracting cross-sectional averages from `y`
+   and `x` as a simple fix for common time effects, while warning that it can perform badly.
+   `xtwest` does not offer it. It would be a few lines in R (`demean = FALSE` argument).
+   **Recommendation:** leave it out of the first version; the bootstrap is the robust option.
 
 ---
 
@@ -550,8 +621,96 @@ Each phase ends with `devtools::check()` clean.
 | Q7 | `ω̂_y`: all available Δy, demeaned only in Case 3; `westerlund`: restricted to the estimation sample, never demeaned | 788–807, 1000–1025 | D8 |
 | Q8 | `û` is also computed on the last `q` rows, outside the estimation sample (it omits the Δx terms, so leads are not needed) | 879–902 | D9 |
 | Q9 | Trend is the raw time variable in the tests and `_n` in the bootstrap | 711, 388 | D18 |
-| Q10 | Bootstrap: the first stage uses the user's `d_t`; lags are re-selected on the null regression; the lead-coefficient loops use the **last unit's** `currlead` (wrong when leads are AIC-selected); minimal burn-in; `expandcl` + `bsample, cluster(t)` + a shared random permutation, which amounts to common time indices drawn with replacement; p-value is `#{S* ≤ S}/B` | 347–610, 1273–1316 | D10–D14, not replicated |
+| Q10 | Bootstrap: the first stage uses the user's `d_t`; lags are re-selected on the null regression; the lead-coefficient loops use the **last unit's** `currlead` (wrong when leads are AIC-selected); `ê` and `Δx` centred per unit over that unit's own sample (`by id: egen mean`), not jointly over common periods; minimal burn-in; `expandcl` + `bsample, cluster(t)` + a shared random permutation, which amounts to common time indices drawn with replacement; p-value is `#{S* ≤ S}/B` | 347–610, 1273–1316 | D10–D14, not replicated |
 | Q11 | Interior gaps are an error; minimum obs = `(p+q+1) + k + 1` (df ≥ 1) | 96–107, 164 | §4 input rules |
 | Q12 | At most 6 regressors (the size of the moments table) | 43 | §2.5 (NA asymptotics beyond 6) |
 | Q13 | `westerlund` uses legacy K = 1 moments, different from Table 1: with trend −2.356/0.6450, −11.8978/44.2471, −2.1128/0.7371, −8.9536/35.6802; without −1.793/0.7904, −7.2014/29.3677, −1.4746/1.0262, −4.3559/21.0535 | 1201–1213 | D17 |
 | Q14 | `gen` creates float (single-precision) temporaries, so the last printed digit can differ (Ga −11.2535 prints as −11.254) | throughout | T1 tolerance |
+
+---
+
+## 13. Implementation notes (2026-10-11)
+
+Everything in §§2-10 is implemented as specified, apart from the points below. The open questions
+of §11 were settled by their recommendations: `hce` is shipped (`data/hce`, built by
+`data-raw/hce.R`), the defaults follow the paper, CRAN is the target, extendr is the binding,
+`demean_u = TRUE`, and there is no cross-sectional demeaning.
+
+**Tooling (P0, §7).**
+
+- rextendr 0.5.0 has no `use_cran_defaults()`; `use_extendr()` now writes the CRAN set-up itself
+  (`tools/msrv.R` checks `cargo`/`rustc` on `PATH` and in `~/.cargo/bin`, enforces the MSRV and
+  prints both versions; `-j 2 --offline` when `NOT_CRAN` is unset; `CARGO_HOME` under `src/`;
+  vendored crates from `src/rust/vendor.tar.xz`). Fixed after review: `configure` had a nix-store
+  shebang (now `#!/usr/bin/env sh`), the cleanup scripts had none, and `extendr-api` was `*`
+  (now `0.9`).
+- `crate-type = ["rlib", "staticlib"]`, not `staticlib` alone: rextendr 0.5 generates
+  `R/extendr-wrappers.R` at build time with a `document` binary that links the rlib.
+- `rextendr::write_license_note()` writes a top-level `LICENSE.note` (not `inst/AUTHORS`); the
+  DESCRIPTION `cph` entry points to it. Cargo metadata has no authors for the extendr crates, so
+  "The extendr developers" is filled in by hand.
+- The locked tree (12 crates) declares `rust-version <= 1.71`, `Cargo.lock` is version 3, and the
+  vendored tarball is 0.57 MB. MSRV check: a one-off `nix build` of fenix's
+  `toolchainOf { channel = "1.71.0"; }` (not added to `home.packages`) built the crate offline from
+  the vendored sources, passed `cargo test`, and installed the package tarball with `NOT_CRAN`
+  unset ("Building for CRAN", `cargo build -j 2 --offline`, nothing written to `HOME`). Doing this
+  in CI (`rustup toolchain install 1.71`) is left for when the repository has CI.
+- `R CMD check --as-cran` (via `devtools::check()`): 0 errors, 0 warnings, 0 notes, after adding
+  `checkbashisms` to home-manager. The installed size is 6.1 MB (5.8 MB `libs`, mostly debug
+  information of Rust's precompiled `std`; 3 MB stripped), which CRAN will report as a NOTE.
+- `devtools::document()` replaces the deprecated `rextendr::document()`.
+
+**Engine.**
+
+- AIC and BIC are `-2 log L + 2k` and `-2 log L + k log n` of the Gaussian regression (Stata's
+  `estat ic`). On the common sample this ranks candidates exactly as `n log(RSS/n) + 2k`; on
+  varying samples (`xtwest`) the constant `n (1 + log 2 pi)` matters and is needed to reproduce it.
+- Rank deficiency uses `lm.fit`'s criterion on unit-norm columns (tolerance 1e-7). The
+  Gram-Cholesky selection falls back to a QR of the nested design when a pivot's squared relative
+  norm is below 1e-10.
+- The bootstrap draws `len = burn + T_span + max_i q_i` indices per replicate, as an R vector
+  read in consecutive blocks (one block per replicate). The results therefore do not depend on
+  `boot_chunk` either, not only on `n_threads`. Two internal functions
+  (`westerlund_boot_state_rs()`, `westerlund_boot_panel_rs()`) expose the first stage and one
+  generated panel, so the DGP is tested against an R re-implementation.
+- Bootstrap critical values are quantiles of type 1, the order statistics that match the
+  plus-one p-value.
+
+**Compatibility with xtwest (§3).**
+
+- One more quirk, beside Q1-Q14: Q15. `xtwest` takes `meanbigT` (the `T` in the panel
+  normaliser and in `sigma_i`, Q4) as `summarize` of the per-row `T_i`, so in unbalanced panels it is the
+  row-weighted mean `sum T_i^2 / sum T_i`. The compat presets do the same.
+- Q6 has no effect: the `westerlund` criterion adds the same constant to every candidate of a
+  unit, so the first-observation values of `cons` and `tren` never change the selection.
+- The compat presets cover the statistics only. The bootstrap controls keep the package defaults
+  (re-selection, `burn = 50`, plus-one p-value) under any `compat`; `boot_pvalue = "xtwest"` is
+  available separately. With `compat`, `lrwindow = NULL` means 2 (xtwest's default);
+  `deterministic` is never changed by `compat`.
+- `compat = "xtwest_westerlund"` requires a constant and a single regressor, as `xtwest` does;
+  it uses its own information criterion and warns if `criterion` is supplied.
+- The internal compat settings (not in `westerlund_control()`) are `ic_ties`, `lrv_y_sample`,
+  `u_sample`, `se_alpha`, `sigma_df`, `ga_weights`, `tbar` and `moments`; all are stored in
+  `result$settings`.
+
+**Validation (§8).** T1-T6 are in `tests/testthat` and pass: the three published runs to 1e-3
+(run 2's Ga is -11.2535, printed by xtwest as -11.254, Q14); the Rust engine against the oracle at
+1e-10 over 80 random configurations (case x K x fixed/IC x balanced/unbalanced x compat) plus every
+control setting; the invariances of T4; the D7 regression test (loghex x 3 gives xtwest's mean
+orders 1.20/0.20 and Gt -2.843, but no change on the common sample). T7 and §9 results are in
+`inst/validation/RESULTS.md`:
+
+- The Table 1 literal is confirmed by simulation (all 72 means within Monte Carlo error).
+- In the Case 1 designs of Tables 2 and 5, Ga and Pa reject less often than in the paper because
+  the simulated data start away from zero after the 50-period burn-in. Without burn-in the paper's
+  Table 2 sizes are matched (Ga 6.4 vs 7.2, Pa 12.0 vs 11.7 for N = 20, T = 100), which suggests
+  the paper's simulations started at zero. With a constant the burn-in is irrelevant.
+- Under cross-sectional dependence the bootstrap brings the size close to 5%, with a remaining
+  excess for Ga* as in the paper's Table 5.
+- Every §9 target is met (e.g. 10.3 s instead of 60 s for N = 100, T = 200, B = 999 on one
+  thread; 3.6x on four threads).
+- For information: CRAN's `Westerlund` 0.1.3 gives the same statistics as the compat modes on
+  the three published runs, to within 2e-12.
+
+**Not done.** win-builder and rhub submissions (they send the package to external services), and
+a CI workflow.

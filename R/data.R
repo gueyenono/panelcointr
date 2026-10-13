@@ -1,0 +1,28 @@
+#' Health care expenditure and GDP in 20 OECD countries
+#'
+#' Annual per-capita health care expenditure and GDP for 20 OECD countries
+#' over 1970-2001, from OECD Health Data 2003: the data of the empirical
+#' application of Westerlund (2007, Section 7) and of Persyn and Westerlund
+#' (2008), distributed with the Stata command `xtwest` as `xtwestdata.dta`.
+#'
+#' @format A data frame with 640 rows (20 countries x 32 years) and 6 variables:
+#' \describe{
+#'   \item{ctr}{Country identifier, 1 to 20 (the countries are not named in the source).}
+#'   \item{year}{Year, 1 to 32 for 1970 to 2001.}
+#'   \item{hex}{Health care expenditure per capita, constant 1995 prices.}
+#'   \item{gdp}{GDP per capita, constant 1995 prices.}
+#'   \item{loghex}{`log(hex)`.}
+#'   \item{loggdp}{`log(gdp)`.}
+#' }
+#' @source OECD Health Data 2003, as distributed in the supporting files of
+#'   Persyn and Westerlund (2008), <http://fmwww.bc.edu/repec/bocode/x/xtwestdata.dta>.
+#'   Reproduced with attribution to the authors and the Stata Journal.
+#' @references
+#' Westerlund, J. (2007). Testing for error correction in panel data.
+#' *Oxford Bulletin of Economics and Statistics* 69(6), 709-748.
+#'
+#' Persyn, D. and Westerlund, J. (2008). Error-correction-based
+#' cointegration tests for panel data. *Stata Journal* 8(2), 232-241.
+#' @examples
+#' str(hce)
+"hce"

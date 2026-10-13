@@ -1,0 +1,20 @@
+test_that("moments are read from Table 1", {
+  m <- westerlund_moments("constant", 3)
+  expect_equal(m$mean, c(Gt = -2.2332, Ga = -10.9667, Pt = -1.9206, Pa = -7.4599))
+  expect_equal(m$var, c(Gt = 0.8886, Ga = 49.4880, Pt = 1.1168, Pa = 42.9975))
+  expect_equal(westerlund_moments("none", 6)$mean[["Pa"]], -10.0074)
+  expect_equal(westerlund_moments("trend", 1)$var[["Ga"]], 46.2420)
+  expect_null(westerlund_moments("trend", 7))
+  expect_equal(westerlund_moments("trend", 1, "legacy")$mean[["Gt"]], -2.356)
+  expect_null(westerlund_moments("trend", 2, "legacy"))
+  expect_null(westerlund_moments("none", 1, "legacy"))
+})
+
+test_that("z-values follow Theorem 1", {
+  m <- westerlund_moments("constant", 1)
+  st <- c(Gt = -2, Ga = -8, Pt = -6, Pa = -5)
+  z <- westerlund_z(st, 25, m)
+  expect_equal(z[["Gt"]], 5 * (-2 + 1.7776) / sqrt(0.8071))
+  expect_equal(z[["Pt"]], (-6 - 5 * -1.4476) / sqrt(0.9885))
+  expect_true(all(is.na(westerlund_z(st, 25, NULL))))
+})
