@@ -156,10 +156,11 @@ plot.pcoint_westerlund <- function(x, which = c("Gt", "Ga", "Pt", "Pa"), ...) {
 #' (from the broom family), available when the generics package is
 #' installed.
 #'
-#' @param x A `pcoint_westerlund` object.
+#' @param x A `pcoint_westerlund` or `pcoint_banerjee` object.
 #' @param ... Ignored.
 #' @return `tidy()`: a data frame with one row per statistic and columns
-#'   `test`, `statistic`, `z`, `p.value`, `p.value.boot` and `alternative`.
+#'   `test`, `statistic`, `z`, `p.value`, `p.value.boot` (Westerlund only)
+#'   and `alternative`.
 #'   `glance()`: a one-row data frame describing the test.
 #' @name westerlund-tidiers
 #' @examples

@@ -43,4 +43,51 @@ lrv_rs <- function(v, m) .Call(wrap__lrv_rs, v, m)
 #' @noRd
 ecm_ic_rs <- function(y, x, k, p_min, p_max, q_min, q_max, settings, method) .Call(wrap__ecm_ic_rs, y, x, k, p_min, p_max, q_min, q_max, settings, method)
 
+#' Banerjee and Carrion-i-Silvestre (2015) procedure for known break
+#' positions (0-based, `N x m_max`, -1 padded).
+#' @noRd
+banerjee_rs <- function(y, x, k, offsets, labels, times, pos, m_max, settings) .Call(wrap__banerjee_rs, y, x, k, offsets, labels, times, pos, m_max, settings)
+
+#' Iterative estimation of unit-specific break dates.
+#' @noRd
+banerjee_breaks_rs <- function(y, x, k, offsets, labels, times, m, h, settings, n_threads) .Call(wrap__banerjee_breaks_rs, y, x, k, offsets, labels, times, m, h, settings, n_threads)
+
+#' t-bar and the number of factors for every admissible common break vector.
+#' @noRd
+banerjee_profile_rs <- function(y, x, k, offsets, labels, times, m, h, settings, n_threads) .Call(wrap__banerjee_profile_rs, y, x, k, offsets, labels, times, m, h, settings, n_threads)
+
+#' Simulated null distribution: `kind` is "idio", "factor_df" or "mq",
+#' `det` "c", "tau" or "gamma"; returns a `reps x ncol` matrix as a vector.
+#' @noRd
+banerjee_null_rs <- function(kind, det, lambda, steps, reps, q, seed, n_threads) .Call(wrap__banerjee_null_rs, kind, det, lambda, steps, reps, q, seed, n_threads)
+
+#' Kernel for tests: symmetric eigendecomposition (decreasing).
+#' @noRd
+eigen_sym_rs <- function(a, n) .Call(wrap__eigen_sym_rs, a, n)
+
+#' Kernel for tests: generalised symmetric eigenproblem `A v = mu B v`.
+#' @noRd
+eigen_gen_rs <- function(a, b, n) .Call(wrap__eigen_gen_rs, a, b, n)
+
+#' Kernel for tests: principal components of an `n x N` matrix.
+#' @noRd
+pca_rs <- function(y, n, criterion, r_max, r) .Call(wrap__pca_rs, y, n, criterion, r_max, r)
+
+#' Kernel for tests: ADF regression without deterministic terms.
+#' @noRd
+adf_rs <- function(e, settings) .Call(wrap__adf_rs, e, settings)
+
+#' Kernel for tests: break search of one unit on a target (`NULL`: `Dy`).
+#' @noRd
+break_search_rs <- function(y, x, k, model, m, h, dols_p, dols_q, target) .Call(wrap__break_search_rs, y, x, k, model, m, h, dols_p, dols_q, target)
+
+#' Kernel for tests: factor detrending, factor ADF and MQ statistics.
+#' @noRd
+factor_tests_rs <- function(f, n, det, settings) .Call(wrap__factor_tests_rs, f, n, det, settings)
+
+#' Kernel for tests: raw xoshiro256++ outputs (as doubles of the top 53
+#' bits) and normal draws of one stream.
+#' @noRd
+rng_rs <- function(seed, stream, n) .Call(wrap__rng_rs, seed, stream, n)
+
 # nolint end

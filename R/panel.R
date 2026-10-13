@@ -130,7 +130,9 @@ prepare_panel <- function(formula, data, index = NULL) {
   time <- time[ord]
   y <- y[ord]
   X <- X[ord, , drop = FALSE]
-  dup <- duplicated(data.frame(id, tpos))
+  # Sorted by unit and time, so duplicated periods are adjacent.
+  n_obs <- length(id)
+  dup <- c(FALSE, id[-1L] == id[-n_obs] & tpos[-1L] == tpos[-n_obs])
   if (any(dup)) {
     abort("Duplicated time periods within unit", if (length(unique(id[dup])) > 1L) "s", ": ",
           enumerate(unique(id[dup])), ".")
@@ -192,4 +194,16 @@ prepare_panel <- function(formula, data, index = NULL) {
     y_name = y_name,
     x_names = x_names
   )
+}
+
+# Stop unless every unit of a prepared panel covers the same calendar
+# window; the error lists each unit's window.
+require_balanced <- function(panel, test) {
+  ends <- panel$start + panel$T
+  if (length(unique(panel$start)) == 1L && length(unique(ends)) == 1L) return(invisible(panel))
+  first <- panel$time[panel$offsets[-length(panel$offsets)] + 1L]
+  last <- panel$time[panel$offsets[-1L]]
+  windows <- paste0(panel$ids, " (", format(first), " to ", format(last), ")")
+  abort(test, " needs a balanced panel: after dropping leading and trailing missing ",
+        "values, every unit must cover the same periods. Windows: ", enumerate(windows), ".")
 }

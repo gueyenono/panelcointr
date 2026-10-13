@@ -9,7 +9,15 @@ use extendr_api::Result;
 
 pub mod core;
 
+use crate::core::adf::{self, AdfSpec, LagRule, LagSample};
+use crate::core::banerjee::{self, Context, Factors, Options};
 use crate::core::bootstrap::{self, BootState};
+use crate::core::breaks::{self, Spec};
+use crate::core::eigen;
+use crate::core::factors::{self, Criterion as FactorCriterion};
+use crate::core::mq;
+use crate::core::nulldist::{self, Det, Kind};
+use crate::core::rng::Rng;
 use crate::core::design;
 use crate::core::ecm::{self, Criterion, EcmOptions, GridMethod, IcSample, IcTies, LagSpec, LrvDet, USample, YSample};
 use crate::core::linalg::Qr;
@@ -325,6 +333,340 @@ fn ecm_ic_rs(y: &[f64], x: &[f64], k: i32, p_min: i32, p_max: i32, q_min: i32, q
     Ok(list!(ic = ws.ic.clone(), lags = p as i32, leads = q as i32))
 }
 
+// ---------------------------------------------------------------------------
+// Banerjee and Carrion-i-Silvestre (2015)
+
+fn setting_int(list: &List, key: &str) -> Result<usize> {
+    let v = setting(list, key)?;
+    let x = v
+        .as_integer()
+        .map(f64::from)
+        .or_else(|| v.as_real())
+        .ok_or_else(|| Error::Other(format!("setting `{key}` must be a number")))?;
+    if !(x >= 0.0) || x.fract() != 0.0 {
+        return err(format!("setting `{key}` must be a non-negative whole number"));
+    }
+    Ok(x as usize)
+}
+
+fn setting_real(list: &List, key: &str) -> Result<f64> {
+    let v = setting(list, key)?;
+    v.as_real()
+        .or_else(|| v.as_integer().map(f64::from))
+        .ok_or_else(|| Error::Other(format!("setting `{key}` must be a number")))
+}
+
+fn setting_bool(list: &List, key: &str) -> Result<bool> {
+    setting(list, key)?
+        .as_bool()
+        .ok_or_else(|| Error::Other(format!("setting `{key}` must be TRUE or FALSE")))
+}
+
+const CRITERIA: [(&str, FactorCriterion); 7] = [
+    ("bic3", FactorCriterion::Bic3),
+    ("ic1", FactorCriterion::Ic1),
+    ("ic2", FactorCriterion::Ic2),
+    ("ic3", FactorCriterion::Ic3),
+    ("pc1", FactorCriterion::Pc1),
+    ("pc2", FactorCriterion::Pc2),
+    ("pc3", FactorCriterion::Pc3),
+];
+
+fn parse_adf(list: &List) -> Result<AdfSpec> {
+    let rule = match setting_str(list, "lag_criterion")?.as_str() {
+        "tsig" => LagRule::Tsig(setting_real(list, "tsig_cut")?),
+        "aic" => LagRule::Aic,
+        "bic" => LagRule::Bic,
+        v => return err(format!("invalid value \"{v}\" for setting `lag_criterion`")),
+    };
+    let k_min = setting_int(list, "lag_min")?;
+    let k_max = setting_int(list, "lag_max")?;
+    if k_min > k_max {
+        return err("`lag_min` must not exceed `lag_max`");
+    }
+    Ok(AdfSpec {
+        k_min,
+        k_max,
+        rule,
+        sample: choose(list, "lag_sample", &[("common", LagSample::Common), ("varying", LagSample::Varying)])?,
+    })
+}
+
+fn parse_banerjee(list: &List, k: usize) -> Result<Options> {
+    let model = setting_int(list, "model")?;
+    if !(1..=6).contains(&model) {
+        return err("`model` must be between 1 and 6");
+    }
+    let factors = match setting_str(list, "factors")?.as_str() {
+        "fixed" => Factors::Fixed(setting_int(list, "r_fixed")?),
+        _ => Factors::Select(choose(list, "factors", &CRITERIA)?),
+    };
+    Ok(Options {
+        spec: Spec { model: model as u8, k, dols_p: setting_int(list, "dols_p")?, dols_q: setting_int(list, "dols_q")? },
+        factors,
+        r_max: setting_int(list, "max_factors")?,
+        adf: parse_adf(list)?,
+        pca_scale: setting_bool(list, "pca_scale")?,
+        mq_bandwidth: setting_int(list, "mq_bandwidth")?,
+        mq_max_var: setting_int(list, "mq_max_var")?,
+    })
+}
+
+/// Break positions from an `N x m_max` column-major matrix, -1 padded.
+fn break_positions(pos: &[i32], nu: usize, m_max: usize) -> Result<Vec<Vec<usize>>> {
+    if pos.len() != nu * m_max {
+        return err("`pos` must have one row per unit");
+    }
+    (0..nu)
+        .map(|i| {
+            let mut v = Vec::new();
+            for j in 0..m_max {
+                let p = pos[j * nu + i];
+                if p >= 0 {
+                    v.push(p as usize);
+                }
+            }
+            if v.windows(2).any(|w| w[1] <= w[0]) {
+                return err("break positions must be increasing");
+            }
+            Ok(v)
+        })
+        .collect()
+}
+
+/// Banerjee and Carrion-i-Silvestre (2015) procedure for known break
+/// positions (0-based, `N x m_max`, -1 padded).
+/// @noRd
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn banerjee_rs(y: &[f64], x: &[f64], k: i32, offsets: &[i32], labels: Vec<String>, times: Vec<String>, pos: &[i32], m_max: i32, settings: List) -> Result<List> {
+    let panel = build_panel(y, x, k, offsets)?;
+    let nu = panel.n_units();
+    let opts = parse_banerjee(&settings, panel.k)?;
+    let pos = break_positions(pos, nu, m_max.max(0) as usize)?;
+    let ctx = Context { panel: &panel, labels: &labels, times: &times };
+    let res = banerjee::run_known(&ctx, &opts, &pos, true).map_err(Error::Other)?;
+    let n = res.n;
+    let ne = n - 1;
+    // ADF residuals on the rows s = 1..n-1 of the cumulated series.
+    let mut resid = vec![f64::NAN; ne * nu];
+    for (i, f) in res.adf.iter().enumerate() {
+        for (j, v) in f.resid.iter().enumerate() {
+            resid[i * ne + f.start - 1 + j] = *v;
+        }
+    }
+    let fs = &res.factor;
+    let empty = || -> Robj { ().into() };
+    let (fd, adf_f, mq_tab): (Robj, Robj, Robj) = match &res.tests {
+        Some(t) => (
+            t.fd.clone().into(),
+            match &t.adf {
+                Some(a) => list!(t = a.t, lags = a.k as i32, n = a.n as i32).into(),
+                None => empty(),
+            },
+            if t.mq.is_empty() {
+                empty()
+            } else {
+                list!(
+                    q = t.mq.iter().map(|m| m.q as i32).collect::<Vec<i32>>(),
+                    mq_c = t.mq.iter().map(|m| m.mq_c).collect::<Vec<f64>>(),
+                    mq_f = t.mq.iter().map(|m| m.mq_f).collect::<Vec<f64>>(),
+                    var_order = t.mq.iter().map(|m| m.p as i32).collect::<Vec<i32>>()
+                )
+                .into()
+            },
+        ),
+        None => (empty(), empty(), empty()),
+    };
+    Ok(list!(
+        t = res.adf.iter().map(|f| f.t).collect::<Vec<f64>>(),
+        lags = res.adf.iter().map(|f| f.k as i32).collect::<Vec<i32>>(),
+        nobs = res.adf.iter().map(|f| f.n as i32).collect::<Vec<i32>>(),
+        tbar = res.tbar,
+        r0 = res.r0 as i32,
+        n = n as i32,
+        eigenvalues = fs.values.clone(),
+        criteria = fs.criteria.clone(),
+        r = fs.r as i32,
+        f = fs.ext.f.clone(),
+        loadings = fs.ext.loadings.clone(),
+        resid = resid,
+        fd = fd,
+        factor_adf = adf_f,
+        mq = mq_tab
+    ))
+}
+
+/// Iterative estimation of unit-specific break dates.
+/// @noRd
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn banerjee_breaks_rs(y: &[f64], x: &[f64], k: i32, offsets: &[i32], labels: Vec<String>, times: Vec<String>, m: i32, h: i32, settings: List, n_threads: i32) -> Result<List> {
+    let panel = build_panel(y, x, k, offsets)?;
+    let opts = parse_banerjee(&settings, panel.k)?;
+    if !(1..=2).contains(&m) || h < 1 || n_threads < 1 {
+        return err("`m` must be 1 or 2, `h` and `n_threads` positive");
+    }
+    let iter_max = setting_int(&settings, "iter_max")?;
+    let iter_tol = setting_real(&settings, "iter_tol")?;
+    let ctx = Context { panel: &panel, labels: &labels, times: &times };
+    let res = banerjee::estimate_breaks(&ctx, &opts, m as usize, h as usize, iter_max, iter_tol, n_threads as usize)
+        .map_err(Error::Other)?;
+    let nu = panel.n_units();
+    let mut pos = vec![0i32; nu * m as usize];
+    for (i, p) in res.pos.iter().enumerate() {
+        for (j, v) in p.iter().enumerate() {
+            pos[j * nu + i] = *v as i32;
+        }
+    }
+    Ok(list!(pos = pos, ssr = res.ssr, converged = res.converged, r = res.r as i32))
+}
+
+/// t-bar and the number of factors for every admissible common break vector.
+/// @noRd
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn banerjee_profile_rs(y: &[f64], x: &[f64], k: i32, offsets: &[i32], labels: Vec<String>, times: Vec<String>, m: i32, h: i32, settings: List, n_threads: i32) -> Result<List> {
+    let panel = build_panel(y, x, k, offsets)?;
+    let opts = parse_banerjee(&settings, panel.k)?;
+    if !(1..=2).contains(&m) || h < 1 || n_threads < 1 {
+        return err("`m` must be 1 or 2, `h` and `n_threads` positive");
+    }
+    let ctx = Context { panel: &panel, labels: &labels, times: &times };
+    let rows = banerjee::profile(&ctx, &opts, m as usize, h as usize, n_threads as usize).map_err(Error::Other)?;
+    let nc = rows.len();
+    let mut pos = vec![0i32; nc * m as usize];
+    for (c, row) in rows.iter().enumerate() {
+        for (j, v) in row.pos.iter().enumerate() {
+            pos[j * nc + c] = *v as i32;
+        }
+    }
+    Ok(list!(
+        pos = pos,
+        tbar = rows.iter().map(|r| r.tbar).collect::<Vec<f64>>(),
+        r = rows.iter().map(|r| r.r as i32).collect::<Vec<i32>>()
+    ))
+}
+
+/// Simulated null distribution: `kind` is "idio", "factor_df" or "mq",
+/// `det` "c", "tau" or "gamma"; returns a `reps x ncol` matrix as a vector.
+/// @noRd
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn banerjee_null_rs(kind: &str, det: &str, lambda: &[f64], steps: i32, reps: i32, q: i32, seed: f64, n_threads: i32) -> Result<Vec<f64>> {
+    let kind = match kind {
+        "idio" => Kind::Idio,
+        "factor_df" => Kind::FactorDf,
+        "mq" if q >= 1 => Kind::Mq(q as usize),
+        _ => return err("invalid `kind` or `q`"),
+    };
+    let det = match det {
+        "c" => Det::C,
+        "tau" => Det::Tau,
+        "gamma" => Det::Gamma,
+        _ => return err("`det` must be \"c\", \"tau\" or \"gamma\""),
+    };
+    if steps < 10 || reps < 1 || n_threads < 1 || !(seed >= 0.0) {
+        return err("invalid simulation size");
+    }
+    nulldist::simulate(kind, det, lambda, steps as usize, reps as usize, seed as u64, n_threads as usize).map_err(Error::Other)
+}
+
+/// Kernel for tests: symmetric eigendecomposition (decreasing).
+/// @noRd
+#[extendr]
+fn eigen_sym_rs(a: &[f64], n: i32) -> Result<List> {
+    let eg = eigen::sym_eigen(a, n.max(0) as usize).map_err(Error::Other)?;
+    Ok(list!(values = eg.values, vectors = eg.vectors))
+}
+
+/// Kernel for tests: generalised symmetric eigenproblem `A v = mu B v`.
+/// @noRd
+#[extendr]
+fn eigen_gen_rs(a: &[f64], b: &[f64], n: i32) -> Result<List> {
+    let eg = eigen::gen_sym_eigen(a, b, n.max(0) as usize).map_err(Error::Other)?;
+    Ok(list!(values = eg.values, vectors = eg.vectors))
+}
+
+/// Kernel for tests: principal components of an `n x N` matrix.
+/// @noRd
+#[extendr]
+fn pca_rs(y: &[f64], n: i32, criterion: &str, r_max: i32, r: i32) -> Result<List> {
+    let n = n.max(1) as usize;
+    let nn = y.len() / n;
+    let crit = CRITERIA.iter().find(|(c, _)| *c == criterion).map(|(_, c)| *c).ok_or_else(|| Error::Other("unknown criterion".into()))?;
+    let ge = factors::gram_eigen(y, n, nn).map_err(Error::Other)?;
+    let crits = factors::criteria(&ge.values, n, nn, r_max.max(0) as usize, crit);
+    let r = if r < 0 { factors::argmin(&crits) } else { r as usize };
+    let ext = factors::extract(y, &ge, r).map_err(Error::Other)?;
+    Ok(list!(values = ge.values, criteria = crits, r = r as i32, f = ext.f, loadings = ext.loadings, resid = ext.resid))
+}
+
+/// Kernel for tests: ADF regression without deterministic terms.
+/// @noRd
+#[extendr]
+fn adf_rs(e: &[f64], settings: List) -> Result<List> {
+    let spec = parse_adf(&settings)?;
+    let mut ws = adf::AdfWorkspace::default();
+    let f = adf::adf(e, &spec, &mut ws).map_err(Error::Other)?;
+    Ok(list!(t = f.t, lags = f.k as i32, n = f.n as i32, resid = f.resid, start = f.start as i32))
+}
+
+/// Kernel for tests: break search of one unit on a target (`NULL`: `Dy`).
+/// @noRd
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn break_search_rs(y: &[f64], x: &[f64], k: i32, model: i32, m: i32, h: i32, dols_p: i32, dols_q: i32, target: Nullable<Vec<f64>>) -> Result<List> {
+    let panel = build_panel(y, x, k, &[0, y.len() as i32])?;
+    let spec = Spec { model: model as u8, k: panel.k, dols_p: dols_p.max(0) as usize, dols_q: dols_q.max(0) as usize };
+    let u = panel.unit(0);
+    let (r0, n) = spec.rows(u.t_len).ok_or_else(|| Error::Other("too few periods".into()))?;
+    let target = match target {
+        Nullable::NotNull(t) => t,
+        Nullable::Null => {
+            let mut dy = Vec::new();
+            breaks::fill_dy(&u, r0, n, &mut dy);
+            dy
+        }
+    };
+    if target.len() != n {
+        return err("`target` has the wrong length");
+    }
+    let cands = breaks::candidates(u.t_len, m.max(0) as usize, h.max(1) as usize, r0, n);
+    let (pos, ssr) = breaks::search(&u, &spec, &cands, r0, n, &target).ok_or_else(|| Error::Other("no admissible break dates".into()))?;
+    Ok(list!(pos = pos.iter().map(|&p| p as i32).collect::<Vec<i32>>(), ssr = ssr, n_candidates = cands.len() as i32))
+}
+
+/// Kernel for tests: factor detrending, factor ADF and MQ statistics.
+/// @noRd
+#[extendr]
+fn factor_tests_rs(f: &[f64], n: i32, det: &[f64], settings: List) -> Result<List> {
+    let n = n.max(1) as usize;
+    let r = f.len() / n;
+    let spec = parse_adf(&settings)?;
+    let t = mq::factor_tests(f, n, r, det, &spec, setting_int(&settings, "mq_bandwidth")?, setting_int(&settings, "mq_max_var")?)
+        .map_err(Error::Other)?;
+    Ok(list!(
+        fd = t.fd,
+        adf_t = t.adf.as_ref().map_or(f64::NAN, |a| a.t),
+        adf_lags = t.adf.as_ref().map_or(-1, |a| a.k as i32),
+        mq_c = t.mq.iter().map(|m| m.mq_c).collect::<Vec<f64>>(),
+        mq_f = t.mq.iter().map(|m| m.mq_f).collect::<Vec<f64>>(),
+        var_order = t.mq.iter().map(|m| m.p as i32).collect::<Vec<i32>>()
+    ))
+}
+
+/// Kernel for tests: raw xoshiro256++ outputs (as doubles of the top 53
+/// bits) and normal draws of one stream.
+/// @noRd
+#[extendr]
+fn rng_rs(seed: f64, stream: f64, n: i32) -> List {
+    let mut g = Rng::stream(seed as u64, stream as u64);
+    let u: Vec<f64> = (0..n.max(0)).map(|_| g.uniform()).collect();
+    let z: Vec<f64> = (0..n.max(0)).map(|_| g.normal()).collect();
+    list!(uniform = u, normal = z)
+}
+
 extendr_module! {
     mod panelcointr;
     fn westerlund_rs;
@@ -336,4 +678,15 @@ extendr_module! {
     fn ols_rs;
     fn lrv_rs;
     fn ecm_ic_rs;
+    fn banerjee_rs;
+    fn banerjee_breaks_rs;
+    fn banerjee_profile_rs;
+    fn banerjee_null_rs;
+    fn eigen_sym_rs;
+    fn eigen_gen_rs;
+    fn pca_rs;
+    fn adf_rs;
+    fn break_search_rs;
+    fn factor_tests_rs;
+    fn rng_rs;
 }

@@ -100,3 +100,138 @@ samples at zero, as the paper prescribes, while the simulated data do not
 gives the same statistics as `compat = "xtwest"` and
 `compat = "xtwest_westerlund"` on the three runs of Persyn and Westerlund
 (2008), to within 2e-12. It is not a dependency.
+
+# Validation results for `pcoint_banerjee()`
+
+Run on 2026-10-12 with panelcointr 0.0.0.9000 (release build), R 4.6.0 and
+rustc 1.95.0, on 8 cores (7 threads). Numbering as in `plan/banerjee.md`,
+Section 8. T2 to T6 are in `tests/testthat/test-banerjee*.R`.
+
+## T1: published tables by simulation
+
+`Rscript inst/validation/banerjee-tables.R 100000` (the papers' design:
+random walks of 1,000 steps, 100,000 draws; 105 s). The z-scores compare our
+draws with the printed values, allowing for the papers' own Monte Carlo error
+(assumed 100,000 draws) and their rounding to three decimals.
+
+| Table | Entries | max abs z | share abs z > 2 |
+|---|---|---|---|
+| BCS Remark 1 (c, tau moments) | 4 | 2.1 | 0.25 |
+| BCS Table II, one break | 18 | 4.8 | 0.33 |
+| BCS Table II, two breaks | 72 | 3.0 | 0.17 |
+| BCS Table I (MQ, one break) | 162 | 5.1 | 0.31 |
+| WP Table 9 (finite T) | 110 | 12.2 | 0.53 |
+| DF quantiles vs MacKinnon (1996) | 6 | 2.0 | 0.17 |
+| Bai and Ng (2004) Table I | 36 | 28.4 | 0.72 |
+
+- Remark 1 and Table II are reproduced: the moments agree to the third
+  decimal or within a few units of it, so the reading of the procedure in
+  the plan is confirmed. The literals are used as printed.
+- BCS Table I agrees within about 0.5 everywhere (the largest z-scores are
+  for q = 5 and 6, where the quantiles are flattest).
+- WP Table 9 (only used with `moments = "finite_sample"`) agrees within
+  0.005 at T >= 250. At T = 50 and 100 our means are up to 0.022 higher (less
+  negative) than the working paper's, e.g. -2.000 against -2.022 for gamma at
+  lambda = 0.5 and T = 50; the working paper's finite-sample design is not
+  described precisely enough to tell why.
+- Bai and Ng (2004) Table I: our critical values agree within about 1 for
+  q <= 4 but are 1.5 to 3 more negative for q = 5 and 6 in the detrended case
+  (e.g. 5%, q = 5: -57.39 against -55.82). Their 10% value for q = 5,
+  detrended, printed as -55.286, is a misprint: it is barely above the 5%
+  value, and we simulate -52.61. The table is kept as printed (it only
+  matters with `mq_level = 0.10` and five or more factors in Models 2 and 5).
+- `R/sysdata.rda` holds quantiles of the c and tau individual statistics and
+  of DF_mu and DF_tau from 10^6 draws (`data-raw/banerjee-tables.R`, 12 s).
+  Their 5% quantiles are -1.943, -2.619, -2.865 and -3.418; MacKinnon's
+  asymptotic values for the Dickey-Fuller cases are -1.941, -2.862 and
+  -3.410.
+
+## T7: size in the paper's Monte Carlo design (Section 5)
+
+`Rscript inst/validation/banerjee-size.R 300` (N = 40, one factor, rho = 1,
+phi = 1, a break at lambda = 0.5 with theta = 3 and, in Models 4 to 6,
+delta_2 = 3; 102 s). Rejection rates at 5%; Monte Carlo standard error about
+1.3 points.
+
+| Model | Breaks | T | sigma2_F | Z, N(0,1) | Z*, Table III | factor ADF | mean r |
+|---|---|---|---|---|---|---|---|
+| 1 | none | 100 | 1 | 3.3 | | 4.3 | 1.00 |
+| 2 | none | 100 | 1 | 9.0 | | 8.3 | 1.00 |
+| 3 | known, 50 | 100 | 1 | 12.7 | | 7.7 | 1.00 |
+| 6 | known, 50 | 100 | 1 | 11.0 | | 7.3 | 1.00 |
+| 5 | known, 50 | 100 | 1 | 9.7 | | 7.7 | 1.00 |
+| 2 | 1, heterogeneous | 100 | 1 | 8.7 | | 7.7 | 1.00 |
+| 2 | 1, homogeneous | 50 | 0.5 | 33.0 | 22.0 | 10.7 | 1.00 |
+| 2 | 1, homogeneous | 100 | 0.5 | 20.3 | 8.3 | 6.0 | 1.00 |
+| 5 | 1, homogeneous | 50 | 0.5 | 94.0 | 80.0 | 20.0 | 1.99 |
+| 5 | 1, homogeneous | 100 | 0.5 | 90.7 | 74.3 | | 2.00 |
+| 2 | 1, homogeneous | 100 | 10 | 21.3 | 8.0 | 9.1 | 1.01 |
+| 5 | 1, homogeneous | 100 | 10 | 87.0 | 69.7 | | 2.00 |
+
+Findings (400 further replications isolated the causes):
+
+- **Known or no breaks, and heterogeneous breaks.** The statistic is
+  calibrated: with the ADF lag fixed at 0 (the true order), the size of Z in
+  Model 2 is 5.5% (mean z 0.00, sd 1.01), and heterogeneous breaks in Model 5
+  give 5.0%. The excess at the defaults (9% in Model 2) comes from the t-sig
+  rule with k_max = 4 at T = 100, which shifts the mean of Z by -0.16; BIC
+  lags give 6.8%. In Models 3 and 6 the asymptotic moments add about 0.13 to
+  the shift at T = 100 (WP Table 9's T = 100 mean is 0.026 lower), so
+  `moments = "finite_sample"` helps there.
+- **Homogeneous breaks, Model 2.** Against the Table III critical values the
+  size is 8% at T = 100 (the table is for N = 100; we use N = 40), close to
+  the paper's Table IV. The N(0, 1) p-value of the infimum over-rejects
+  badly, as the print method warns.
+- **Homogeneous breaks, Model 5: does not reproduce the paper.** Table IV
+  reports 6.5% to 9% for Z*_tau; we find 70% to 94%. At the true date Z is
+  centred (mean 0.11), but at misplaced dates it is shifted down by about 1.3:
+  a misplaced break in the cointegrating vector leaves `delta_2 Delta x` in
+  part of the residuals, a variance shift in the cumulated errors that moves
+  the ADF distribution to the left (a level shift alone moves it by only
+  0.1). The infimum over the candidate dates then picks a wrong date (the
+  true date in about 10% of the samples), and BIC3 finds a second factor in
+  the common break spike. Fixing r = 1 and the lags does not remove it (67%).
+  So the literal eq. 15 is not robust to large shifts of the cointegrating
+  vector; known breaks or heterogeneous estimation (which minimises the SSR
+  and finds the true date) have correct size. Documented in
+  `?pcoint_banerjee`.
+
+## Section 9: performance
+
+`Rscript inst/bench/banerjee.R` (medians):
+
+| Workload | Target | 1 thread | 2 threads | 4 threads |
+|---|---|---|---|---|
+| Known breaks, Model 5, m = 2, N = 63, T = 123, K = 2 | < 10 ms | 7.3 ms | | |
+| Heterogeneous, same panel, m = 2 | < 1 s | 0.86 s | 0.48 s | 0.27 s |
+| Homogeneous, Model 2, m = 1, N = 40, T = 250 | < 0.5 s | 0.18 s | | |
+| Homogeneous, Model 5, m = 2, N = 40, T = 100 | < 3 s | 0.98 s | 0.51 s | 0.26 s |
+| Gamma moments, 100,000 x 1000 | < 2 s | 1.75 s | 0.91 s | 0.46 s |
+
+## T8: CRAN `xtbreakcoint` 1.0.4 (information only)
+
+`Rscript inst/validation/banerjee-xtbreakcoint.R` (outputs only; the package
+is GPL-3 and none of its code is used).
+
+- **One unit, no factors, fixed lags (k = 0, 1, 2; 60 t-ratios).** Its
+  "constant" and "trend" models both project the first differences on a
+  constant and `Delta x`, the projection of our Model 2, and its ADF
+  regression (own sample per lag, `RSS / (n - k - 1)`, cumulation without a
+  zero start) is ours: the t-ratios agree to 9e-15.
+- **N = 20, T = 60, heterogeneous slopes, no factors, k = 1.** The unit
+  t-ratios hardly correlate (-0.25 to 0.44): `xtbreakcoint` pools the
+  cointegrating vector over units (Appendix A, X2), so each unit keeps
+  `(b_i - b) Delta x` and its own drift in the residuals. Its t-bar is the
+  same for "constant" and "trend" (the same projection), around -0.5, close
+  to the mean of the c distribution; in the trend model it is standardised
+  with tau moments, which gives Z = +7.3 to +10.0 on data generated under
+  H0 with a trend, where our Model 2 gives -1.0 to 0.9.
+- **One common factor, both at their defaults.** Both find r = 1 (IC_p2 and
+  BIC3). `xtbreakcoint` selects fewer lags (BIC: mean 0.05 to 0.15; t-sig:
+  0.25 to 1.05). Z in the trend model is again +9.6 to +11.8 for
+  `xtbreakcoint` and -0.5 to 0.8 for ours.
+
+## Not done
+
+- T9 (golden test on the PWT 6.3 panel of BCS 2017, Table 16): the data have
+  not been obtained.

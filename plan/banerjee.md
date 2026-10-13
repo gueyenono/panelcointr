@@ -1,8 +1,10 @@
 # Plan: `pcoint_banerjee()`: Banerjee & Carrion-i-Silvestre (2015) panel cointegration tests with structural breaks and common factors
 
 Status: written 2026-10-12. The open questions were settled the same day: all recommendations
-accepted (§11). Not yet implemented. Builds on the infrastructure of `pcoint_westerlund()`
-(`plan/westerlund.md`).
+accepted (§11). Implemented 2026-10-12: P0-P6 (the vignette uses simulated data) and P7 except T9,
+which waits for the PWT data; validation results in `inst/validation/RESULTS.md`. Choices made during
+the implementation are B25-B31 (§3). Builds on the infrastructure of
+`pcoint_westerlund()` (`plan/westerlund.md`).
 
 ## 0. Summary
 
@@ -363,6 +365,13 @@ argument.
 | B22 | DOLS terms | recommended under endogeneity; exposition assumes strict exogeneity | — | **`dols = 0`** | `dols = c(lags, leads)` adds `Δ²x` terms (§2.9) |
 | B23 | Residuals used for CD | `ẽ` "for different values of k" (Table V) | — | **ADF residuals of the selected models, over common periods** | |
 | B24 | Individual rejections | Table V share at 5% | xtbreakcoint: −1.95 for every model | **each model's own 5% critical value** | −1.95 is right only for c |
+| B25 | DOLS argument | not stated | — | **`dols = 0`: no terms; `dols = c(p, q)` adds `Δ²x_{t−j}`, `j = −q..p`, including `j = 0`** | the usual DOLS set in first differences; a scalar sets both orders |
+| B26 | Names of the break columns | — | — | **`break_date` (one break), `break_date_1`, `break_date_2`** | `break` is a reserved word in R |
+| B27 | PCA inside the break iteration (§2.8) | not stated | — | **unscaled, even with `pca_scale = TRUE`** | keeps `S` monotone; the final Z uses `pca_scale` |
+| B28 | `mq_level` | 5% | — | **1%, 5% or 10% only** | the levels of the published tables |
+| B29 | Default `r_max` in small panels | 6 | — | **`min(6, min(N, n) − 1)`; an explicit `max_factors` that is too large is an error** | with `r_max = N − 1`, BIC3 tends to pick many factors (σ̂² = V(r_max) is small); documented |
+| B30 | A single `breaks` value of 1 or 2 | — | — | **number of breaks to estimate**, even if 1 or 2 is also a time value; other values are dates | give unit-specific dates as a data frame to place a break after period 1 or 2 |
+| B31 | Bai–Ng Table I misprint (q = 5, detrended, 10%: −55.286) | — | our simulation −52.61 | **kept as printed** | flagged in `R/banerjee-tables.R` and RESULTS.md; affects `mq_level = 0.10` with ≥ 5 factors only |
 
 ---
 

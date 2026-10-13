@@ -1,0 +1,138 @@
+---
+title: "Panel cointegration with breaks and common factors (Banerjee and Carrion-i-Silvestre 2015)"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Panel cointegration with breaks and common factors (Banerjee and Carrion-i-Silvestre 2015)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r setup}
+library(panelcointr)
+```
+
+## The tests
+
+Banerjee and Carrion-i-Silvestre (2015) test the null hypothesis of no
+cointegration in panels whose units share unobserved common factors and may
+have structural breaks. For unit $i$,
+
+$$
+y_{it} = D_{it} + x_{it}' \delta_{it} + u_{it}, \qquad
+u_{it} = F_t' \pi_i + e_{it},
+$$
+
+where $D_{it}$ holds a constant, possibly a trend, and level and trend
+shifts, and $\delta_{it}$ may shift at the break dates. The factors $F_t$
+may be I(0) or I(1). The test follows the PANIC approach of Bai and Ng
+(2004): each unit's cointegrating regression is estimated in first
+differences, the common factors are extracted from the residuals by
+principal components, and the defactored residuals are cumulated and tested
+for a unit root with ADF regressions. The pooled statistic
+
+$$
+Z = \sqrt{N}\, \frac{\bar t - \Theta}{\sqrt{\Psi}}
+$$
+
+is asymptotically standard normal and left-tailed. Rejecting means that the
+idiosyncratic errors are stationary; the variables are cointegrated only if,
+in addition, no common factor is I(1). The factors are therefore tested
+separately: by an ADF test when there is one, and by the MQ tests of Bai and
+Ng (2004) when there are several.
+
+## A simulated panel
+
+We simulate 30 units over 80 years with one I(1) common factor, a regressor
+whose coefficient shifts in 1990, and cointegrated idiosyncratic errors.
+
+```{r data}
+set.seed(42)
+N <- 30
+T <- 80
+years <- 1950 + seq_len(T)
+f <- cumsum(rnorm(T))
+d <- do.call(rbind, lapply(seq_len(N), function(i) {
+  x <- cumsum(rnorm(T))
+  e <- as.numeric(stats::filter(rnorm(T), 0.5, method = "recursive"))
+  y <- 1 + 0.02 * seq_len(T) + x + 0.5 * (years > 1990) * x + rnorm(1, 1) * f + e
+  data.frame(country = i, year = years, y = y, x = x)
+}))
+```
+
+## Known breaks
+
+The break date is the last year of the old regime. Model 5 has a constant, a
+trend, a level shift and a shift in the cointegrating vector:
+
+```{r known}
+fit <- pcoint_banerjee(y ~ x, data = d, index = c("country", "year"),
+                       model = 5, breaks = 1990)
+fit
+```
+
+The idiosyncratic errors are stationary (Z rejects), but the common factor
+is I(1): `y` and `x` cointegrate only together with the common stochastic
+trend. `summary()` adds the unit-level ADF tests, the factor-number
+criterion and the selected lags:
+
+```{r summary}
+summary(fit)
+```
+
+## Estimated breaks
+
+With `breaks = 1` or `2`, the dates are estimated. Heterogeneous dates
+(one per unit) come from an iterative least-squares procedure that
+alternates between the break dates and the common factors:
+
+```{r hetero}
+het <- pcoint_banerjee(y ~ x, data = d, index = c("country", "year"),
+                       model = 5, breaks = 1)
+table(het$units$break_date)
+het$statistics
+```
+
+Common dates are chosen to minimise the statistic; the paper's Table III
+gives finite-sample critical values for this infimum. `plot()` shows the
+profile over the candidate dates:
+
+```{r homog, fig.width = 6, fig.height = 4}
+hom <- pcoint_banerjee(y ~ x, data = d, index = c("country", "year"),
+                       model = 2, breaks = 1, break_type = "homogeneous")
+hom$statistics
+plot(hom)
+```
+
+In simulations of the paper's own design, the infimum statistic in Model 5
+over-rejects when the cointegrating vector shifts a lot (see
+`inst/validation/RESULTS.md`); known dates or heterogeneous estimation are
+safer there.
+
+## Settings
+
+`factors` fixes the number of factors or chooses the criterion (BIC3 of Bai
+and Ng 2002 by default, at most `max_factors = 6`), `lags` the ADF lag order
+(t-sig rule of Ng and Perron 1995 by default) and `dols` adds leads and lags
+of $\Delta^2 x$ for endogenous regressors. `banerjee_control()` holds the
+rest: the lag rule, the standardisation of the residuals before the
+principal components, finite-sample moments, and the MQ settings.
+
+## References
+
+Bai, J. and Ng, S. (2002). Determining the number of factors in approximate
+factor models. *Econometrica* 70(1), 191-221.
+
+Bai, J. and Ng, S. (2004). A PANIC attack on unit roots and cointegration.
+*Econometrica* 72(4), 1127-1177.
+
+Banerjee, A. and Carrion-i-Silvestre, J. L. (2015). Cointegration in panel
+data with structural breaks and cross-section dependence. *Journal of
+Applied Econometrics* 30(1), 1-23.
+
+Ng, S. and Perron, P. (1995). Unit root tests in ARMA models with
+data-dependent methods for the selection of the truncation lag. *Journal of
+the American Statistical Association* 90, 268-281.
