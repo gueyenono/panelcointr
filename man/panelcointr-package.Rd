@@ -6,7 +6,7 @@
 \alias{panelcointr-package}
 \title{panelcointr: Panel Cointegration Tests}
 \description{
-Implements panel cointegration tests robust to cross-section dependence and structural breaks, including the error-correction tests of Westerlund (2007) \doi{10.1111/j.1468-0084.2007.00477.x}, the Durbin-Hausman tests of Westerlund (2008), and the tests of Banerjee and Carrion-i-Silvestre (2015, 2017). The computations are written in Rust.
+Implements panel cointegration tests robust to cross-section dependence and structural breaks: the error-correction tests of Westerlund (2007) \doi{10.1111/j.1468-0084.2007.00477.x}, with a bootstrap for cross-section dependence, and the tests of Banerjee and Carrion-i-Silvestre (2015) \doi{10.1002/jae.2348}, which allow for common factors and structural breaks. The computations are written in Rust.
 }
 \author{
 \strong{Maintainer}: G. Nono Ghislain \email{nonoghislain@gmail.com}

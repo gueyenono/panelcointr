@@ -1,6 +1,7 @@
 # T1: published xtwest output (Persyn and Westerlund 2008, Stata Journal 8(2))
-# on xtwestdata (`hce`), loghex ~ loggdp with constant and trend. Tolerance
-# 1e-3: the printed precision (Stata also stores temporaries as floats).
+# on xtwestdata (`hce`), loghex ~ loggdp with constant and trend. Absolute
+# tolerance 1e-3: the printed precision (Stata also stores temporaries as
+# floats).
 sj_runs <- list(
   run1 = list(args = list(lags = 1, leads = 1, lrwindow = 3, compat = "xtwest"),
               stats = c(-2.681, -10.927, -12.035, -10.524), lags = 1, leads = 1),
@@ -15,10 +16,10 @@ sj_runs <- list(
 test_that("compat modes reproduce the published xtwest output (T1)", {
   for (run in sj_runs) {
     fit <- do.call(hce_fit, run$args)
-    expect_equal(fit$statistics$value, run$stats, tolerance = 1e-3, scale = 1)
+    expect_lt(max(abs(fit$statistics$value - run$stats)), 1e-3)
     expect_equal(mean(fit$units$lags), run$lags, tolerance = 1e-12)
     expect_equal(mean(fit$units$leads), run$leads, tolerance = 1e-12)
-    if (!is.null(run$z)) expect_equal(fit$statistics$z, run$z, tolerance = 1e-3, scale = 1)
+    if (!is.null(run$z)) expect_lt(max(abs(fit$statistics$z - run$z)), 1e-3)
   }
 })
 
@@ -34,7 +35,7 @@ test_that("z-values use Table 1 (Theorem 1 standardisation)", {
   expect_equal(fit$statistics$z, z, tolerance = 1e-14)
   expect_equal(fit$statistics$p_value, pnorm(z), tolerance = 1e-14)
   # Published statistics of run 1 give z-values -1.731, 0.713, -2.959, -1.160.
-  expect_equal(fit$statistics$z, c(-1.731, 0.713, -2.959, -1.160), tolerance = 1e-3, scale = 1)
+  expect_lt(max(abs(fit$statistics$z - c(-1.731, 0.713, -2.959, -1.160))), 1e-3)
 })
 
 test_that("the oracle reproduces the published xtwest output (T1 on the oracle)", {
@@ -42,7 +43,7 @@ test_that("the oracle reproduces the published xtwest output (T1 on the oracle)"
   for (run in sj_runs) {
     s <- do.call(hce_fit, run$args)$settings
     ref <- ref_westerlund(units, s, rep(run$args$lrwindow, 20))
-    expect_equal(unname(ref$stats), run$stats, tolerance = 1e-3, scale = 1)
+    expect_lt(max(abs(unname(ref$stats) - run$stats)), 1e-3)
     expect_equal(mean(ref$lags), run$lags)
     expect_equal(mean(ref$leads), run$leads)
   }
@@ -187,7 +188,7 @@ test_that("varying-sample selection depends on the units of y (D7 regression tes
   b <- do.call(pcoint_westerlund, c(list(loghex ~ loggdp, data = hce3, index = c("ctr", "year"),
                                          deterministic = "trend"), args))
   expect_equal(c(mean(b$units$lags), mean(b$units$leads)), c(1.20, 0.20))
-  expect_equal(b$statistics$value[1], -2.843, tolerance = 1e-3, scale = 1)
+  expect_lt(abs(b$statistics$value[1] - (-2.843)), 1e-3)
   expect_false(isTRUE(all.equal(a$statistics$value, b$statistics$value)))
   # On the common sample (the default) the selection is scale invariant.
   args$control <- westerlund_control(ic_sample = "common")
