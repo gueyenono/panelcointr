@@ -125,7 +125,7 @@ summary.pcoint_banerjee <- function(object, ...) {
   b <- object$breaks
   dist <- NULL
   if (!is.null(b$dates) && !isTRUE(b$common)) {
-    dist <- lapply(b$dates[-1L], function(v) table(v, useNA = "no"))
+    dist <- Map(function(v, n) table(v, useNA = "no", dnn = n), b$dates[-1L], names(b$dates)[-1L])
   }
   structure(list(object = object, lags = table(lags = object$units$lags), break_dates = dist),
             class = "summary.pcoint_banerjee")
@@ -151,10 +151,7 @@ print.summary.pcoint_banerjee <- function(x, digits = 3L, ...) {
   print(x$lags)
   if (!is.null(x$break_dates)) {
     cat("\nEstimated or given break dates (number of units)\n")
-    for (n in names(x$break_dates)) {
-      cat(n, ":\n", sep = "")
-      print(x$break_dates[[n]])
-    }
+    for (tab in x$break_dates) print(tab)
   }
   cat("\nUnits\n")
   u <- obj$units

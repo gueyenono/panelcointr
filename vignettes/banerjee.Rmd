@@ -1,8 +1,8 @@
 ---
-title: "Panel cointegration with breaks and common factors (Banerjee and Carrion-i-Silvestre 2015)"
+title: "A beginner's guide to the Banerjee and Carrion-i-Silvestre (2015) test"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Panel cointegration with breaks and common factors (Banerjee and Carrion-i-Silvestre 2015)}
+  %\VignetteIndexEntry{A beginner's guide to the Banerjee and Carrion-i-Silvestre (2015) test}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -11,115 +11,436 @@ vignette: >
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 ```
 
+This guide shows how to test for a long-run relationship in panel data when
+the units are hit by common shocks and may have sudden breaks, with the test
+of Banerjee and Carrion-i-Silvestre (2015) and the function
+`pcoint_banerjee()`. It assumes that you know what a regression and a
+p-value are. Technical words are explained when they first appear, and again
+in the glossary at the end.
+
 ```{r setup}
 library(panelcointr)
 ```
 
-## The tests
+## 1. Cointegration in a nutshell
 
-Banerjee and Carrion-i-Silvestre (2015) test the null hypothesis of no
-cointegration in panels whose units share unobserved common factors and may
-have structural breaks. For unit $i$,
+Many economic series wander over time without a fixed level to come back to,
+like GDP or prices. Such a series is called **non-stationary**, or is said to
+have a **unit root**. A regression of one wandering series on another can
+find a "significant" link even when there is none (a **spurious
+regression**).
+
+Some wandering series really are linked: they wander *together*, like a
+person walking a dog on a long leash. Each wanders, but the leash keeps them
+close. Such series are **cointegrated**: the gap between them stays within
+bounds. A test of cointegration asks whether such a leash exists.
+
+* The **null hypothesis** (what the test assumes until the data say
+  otherwise) is *no cointegration*.
+* A **small p-value** (below 0.05, say) is evidence *for* cointegration.
+
+A **panel** follows many units (countries, regions, firms) over time.
+Pooling the units gives the test far more information than a single time
+series. The companion guide,
+`vignette("westerlund", package = "panelcointr")`, explains these ideas at
+more length.
+
+## 2. Two complications this test handles
+
+### Common factors
+
+Countries are not independent: a world recession, an oil price shock or a
+new technology hits many of them at once. The test describes such shared
+influences as hidden **common factors**. Each unit reacts to a factor with
+its own strength, called its **loading**. A factor can be **stationary**
+(like a business cycle, which goes up and down around a fixed level) or it
+can wander (like the spread of a new technology).
+
+The test splits each unit's departure from the long-run relationship into
+two parts:
+
+* a **common part**: the factors, times the unit's loadings;
+* an **idiosyncratic part**: what is specific to the unit.
+
+It estimates the factors with **principal components**, a method that finds
+the patterns most units share. It then answers two questions:
+
+1. *Is the idiosyncratic part stationary?* This is the panel statistic `Z`.
+2. *Do the common factors wander?* This is a separate test on the factors.
+
+The conclusion needs both answers:
+
+| `Z` rejects (p < 0.05)? | Some factor wanders? | Conclusion |
+|---|---|---|
+| no | (any) | No evidence of cointegration. |
+| yes | no | The variables are cointegrated. |
+| yes | yes | The variables move together only once the wandering common factors are accounted for: on their own, they are not cointegrated. |
+
+### Structural breaks
+
+A **structural break** is a sudden, lasting change: a reform, a financial
+crisis, a new currency. It can shift the level of the relationship, its
+trend, or the relationship itself (its slope). A break the test does not
+know about looks like a permanent shock, which is exactly what a unit root
+is. So ignoring breaks can hide a relationship, or confuse the tests on the
+factors, as the example below shows.
+
+A break date is given as the **last period of the old regime**: with
+`breaks = 1990`, the new regime starts in 1991.
+
+### The six models
+
+The argument `model` chooses what the relationship contains:
+
+| `model` | Constant | Trend | Breaks shift | Slope can change at the break? | Breaks allowed |
+|---|---|---|---|---|---|
+| 1 | yes | no | the level | no | none, known or estimated |
+| 2 | yes | yes | the level | no | none, known or estimated |
+| 3 | yes | yes | the level and the trend | no | known dates, common to all units |
+| 4 | yes | no | the level | yes | known or estimated |
+| 5 | yes | yes | the level | yes | known or estimated |
+| 6 | yes | yes | the level and the trend | yes | known dates, common to all units |
+
+Use a model with a trend (2, 3, 5 or 6) when the series trend, and a model
+whose slope can change (4, 5 or 6) when the break may change the
+relationship itself.
+
+## 3. Example: simulated data where we know the answer
+
+The best way to understand a test is to run it on data whose answer we
+know. We build a panel of 20 countries over 60 years in which:
+
+* `y` and `x` are cointegrated: `y = 2 + 0.8 x` plus deviations that fade
+  away;
+* each country has one break, in its own year, where `y` jumps up by 12;
+* all countries share a business cycle (a stationary common factor), each
+  with its own exposure.
+
+```{r simulate}
+set.seed(1)
+N <- 20                       # number of countries
+T <- 60                       # number of years
+years <- 1960 + seq_len(T)    # 1961 to 2020
+# A business cycle shared by all countries: it goes up and down
+# but does not wander off.
+cycle <- as.numeric(stats::filter(rnorm(T), 0.6, method = "recursive"))
+panel <- do.call(rbind, lapply(seq_len(N), function(i) {
+  x <- 10 + cumsum(rnorm(T))                 # a wandering explanatory variable
+  break_year <- sample(1975:2005, 1)         # this country's break year
+  jump <- 12 * (years > break_year)          # y jumps by 12 after the break
+  exposure <- runif(1, 0.5, 1.5)             # how strongly the cycle hits it
+  deviation <- as.numeric(stats::filter(rnorm(T), 0.5, method = "recursive"))
+  y <- 2 + 0.8 * x + jump + exposure * cycle + deviation
+  data.frame(country = sprintf("C%02d", i), year = years, y = y, x = x,
+             true_break = break_year)
+}))
+head(panel)
+```
+
+The data are in **long format**: one row per country and year. The plot
+shows the gap `y - 0.8 x` for four countries, with their break years as
+dashed lines. Each gap jumps once and otherwise moves around a stable level:
+that is the leash.
+
+```{r plot-sim, fig.width = 7, fig.height = 4}
+op <- par(mfrow = c(2, 2), mar = c(4, 4, 2, 1))
+for (cc in c("C01", "C02", "C03", "C04")) {
+  u <- panel[panel$country == cc, ]
+  plot(u$year, u$y - 0.8 * u$x, type = "l", xlab = "Year", ylab = "y - 0.8 x",
+       main = cc)
+  abline(v = u$true_break[1], lty = 2)
+}
+par(op)
+```
+
+### 3.1 First attempt: ignoring the breaks
+
+```{r ignore}
+fit_ignore <- pcoint_banerjee(y ~ x, data = panel, index = c("country", "year"),
+                              model = 1)
+fit_ignore
+```
+
+Line by line:
+
+* **H0** reminds you of the null hypothesis: no cointegration, meaning that
+  every unit's idiosyncratic part has a unit root.
+* **Model 1** is a constant without a trend, which suits these data.
+  **Breaks: none** says that we ignored the breaks.
+* **ADF lags**: the test on each unit is an **ADF test** (augmented
+  Dickey-Fuller, the standard unit root test). It includes a few past
+  changes to absorb short-run movements; their number is chosen per unit, by
+  default between 0 and 4.
+* **Moments**: the two numbers used to put the statistic on a standard
+  scale. You can ignore them.
+* **The table**: `Value` is the average of the units' ADF statistics and
+  `Z-value` puts it on a standard normal scale. The test is left-tailed:
+  very negative values reject the null. Here the p-value is tiny.
+* **Common factors**: **r** is the number of common factors found, here
+  `r fit_ignore$factors$r`, chosen by the IC1 criterion among 0 to 6. The
+  next line gives **r1**, the number of them that wander, according to the
+  two **MQ tests** of Bai and Ng (2004): `r fit_ignore$factors$r1_c` by
+  both. A factor that wanders is called **I(1)** (integrated of order one);
+  the opposite is **stationary**. When there is a single factor, this line
+  instead shows one ADF test on it, as in the next attempt.
+* **CD test**: a check of whether the idiosyncratic parts of different units
+  are still correlated (Pesaran 2015). Treat it as a rough indication only.
+  Juodis and Reese (2022) show that it can be misleading on what is left
+  after common effects are removed, and here it rejects although we
+  simulated independent units.
+* **Individual ADF rejections**: the share of countries whose own test
+  rejects at 5%: `r round(100 * mean(fit_ignore$units$reject_5))`% here.
+* **The final message** gives the conclusion of the table in section 2: the
+  idiosyncratic parts look stationary, but common factors wander, so `y` and
+  `x` would not be cointegrated on their own.
+
+But we built a single common factor, the business cycle, and it does *not*
+wander. Ignoring the breaks made the method find a second factor and judge
+both to be wandering, so the conclusion is wrong.
+
+### 3.2 Second attempt: estimating the breaks
+
+With `breaks = 1`, the function estimates one break date per country:
+
+```{r estimate}
+fit_breaks <- pcoint_banerjee(y ~ x, data = panel, index = c("country", "year"),
+                              model = 1, breaks = 1)
+fit_breaks
+```
+
+Now the method finds a single factor, the ADF test on it says
+**stationary**, and the final message is gone: by the table in section 2,
+`y` and `x` are cointegrated, which is the truth.
+`Z` is also more negative, and
+`r round(100 * mean(fit_breaks$units$reject_5))`% of the countries reject on
+their own, against `r round(100 * mean(fit_ignore$units$reject_5))`% before.
+
+How good are the estimated dates? Compare them with the true ones:
+
+```{r dates}
+true_dates <- unique(panel[, c("country", "true_break")])
+estimated <- fit_breaks$units[, c("id", "break_date")]
+comparison <- merge(true_dates, estimated, by.x = "country", by.y = "id")
+head(comparison)
+mean(comparison$true_break == comparison$break_date)   # share found exactly
+```
+
+### 3.3 What if the common factor wanders?
+
+Now we add a second common force that does wander (think of a technology
+that spreads across countries), again with a different exposure for each
+country:
+
+```{r wander}
+trend <- cumsum(rnorm(T))           # a common force that wanders
+exposure <- runif(N, 0.5, 1.5)      # each country's exposure to it
+panel2 <- panel
+# The rows are ordered by country, then by year.
+panel2$y <- panel$y + rep(exposure, each = T) * rep(trend, times = N)
+fit_wander <- pcoint_banerjee(y ~ x, data = panel2, index = c("country", "year"),
+                              model = 1, breaks = 1)
+fit_wander
+```
+
+The test now reports a wandering common factor, which is correct. (It finds
+one factor rather than two: here the criterion does not separate the
+business cycle from the new trend. What matters for the conclusion is that
+a wandering factor is detected.) `y` and `x` are no longer cointegrated on
+their own: `y` contains a wandering trend that `x` does not. They move
+together only once that common trend is accounted for.
+
+The three attempts side by side:
+
+```{r compare}
+summarise <- function(fit) {
+  data.frame(Z = round(fit$statistics$z, 2),
+             p_value = signif(fit$statistics$p_value, 2),
+             factors = fit$factors$r,
+             wandering_factors = max(fit$factors$r1_c, fit$factors$r1_f),
+             share_rejecting = mean(fit$units$reject_5))
+}
+rbind(ignore_breaks = summarise(fit_ignore),
+      estimate_breaks = summarise(fit_breaks),
+      wandering_factor = summarise(fit_wander))
+```
+
+## 4. Example: health spending and GDP
+
+Real data are messier. The package includes per-capita health care
+expenditure and GDP (in logs) for 20 OECD countries over 1970-2001, the data
+of the `pcoint_westerlund()` guide. Both series trend upwards, so we use
+Model 2 (constant and trend):
+
+```{r hce}
+fit_hce <- pcoint_banerjee(loghex ~ loggdp, data = hce, index = c("ctr", "year"),
+                           model = 2)
+fit_hce
+```
+
+`Z` does not reject: there is no evidence of cointegration. But look at the
+number of factors: `r fit_hce$factors$r`, the largest number allowed
+(`max_factors = 6`). When the choice hits the ceiling, it is a warning sign.
+With only 32 years, the number of factors is hard to pin down, and the
+available criteria disagree. Does the conclusion depend on it? Try several
+settings:
+
+```{r robustness}
+settings <- list(
+  "default (IC1)" = list(),
+  "BIC3 criterion" = list(factors = "bic3"),
+  "standardised" = list(control = banerjee_control(pca_scale = TRUE)),
+  "1 factor" = list(factors = 1),
+  "2 factors" = list(factors = 2),
+  "3 factors" = list(factors = 3)
+)
+robust <- t(sapply(settings, function(s) {
+  f <- do.call(pcoint_banerjee, c(list(loghex ~ loggdp, data = hce,
+                                       index = c("ctr", "year"), model = 2), s))
+  c(factors = f$factors$r, Z = round(f$statistics$z, 2),
+    p_value = round(f$statistics$p_value, 3))
+}))
+robust
+```
+
+The number of factors changes, but `Z` never rejects at the 5% level. The
+conclusion, no clear evidence of cointegration, does not depend on this
+choice, and it agrees with the robust (bootstrap) p-values of the
+Westerlund tests on the same data. Checks like this one are worth doing
+whenever a setting is uncertain.
+
+## 5. Choosing the settings
+
+* **`model`**: see the table in section 2. Use a trend if the series trend,
+  and a model whose slope can change if the break may alter the
+  relationship.
+* **`breaks`**:
+  * `NULL` (the default): no breaks (Models 1 and 2 only).
+  * Known dates common to all units: a vector, such as `breaks = 1990` or
+    `breaks = c(1980, 1995)`.
+  * Known dates that differ by unit: a data frame with the unit in the first
+    column and the date in the second (see section 7).
+  * Unknown dates: `breaks = 1` or `2` estimates that many breaks per unit.
+    By default each unit gets its own dates (`break_type =
+    "heterogeneous"`). `break_type = "homogeneous"` estimates one date for
+    all units; use it with care (section 6).
+* **`factors`**: how to choose the number of common factors. The default,
+  `"ic1"`, is the IC_p1 criterion of Bai and Ng (2002). Other criteria are
+  available (`"ic2"`, `"ic3"`, `"pc1"` to `"pc3"`, `"bic3"`), or you can fix
+  the number, as in `factors = 2`. `max_factors` (default 6) caps it.
+  `banerjee_control(pca_scale = TRUE)` puts the units on a common scale
+  before the factors are estimated.
+* **`lags`**: the number of past changes in each unit's ADF test. The
+  default chooses it per unit, between 0 and 4 for most panels, with the
+  t-sig rule of Ng and Perron (1995). `lags = 1` fixes it.
+* **`dols`**: if `x` itself reacts to `y`, add leads and lags of the changes
+  of `x` with `dols = 1`, or `dols = c(lags, leads)`.
+* **`control = banerjee_control(...)`**: further settings, such as the lag
+  rule, `pca_scale`, or `moments = "finite_sample"`, which uses moments
+  computed for short samples instead of the asymptotic ones.
+
+## 6. Practical checklist
+
+* **Balanced panel.** Every unit must cover the same periods, with no
+  missing values: the common factors need a common time axis.
+* **Enough time periods.** The factors are estimated from the data, which
+  needs a time dimension that is not too short compared with the number of
+  units. The authors themselves did not apply the test to a panel of 49
+  units and 29 years for this reason (Banerjee and Carrion-i-Silvestre
+  2017).
+* **Look at the factors line.** A rejection by `Z` means cointegration only
+  if no common factor wanders. If the number of factors hits
+  `max_factors`, check other settings, as in section 4.
+* **Breaks.** If you suspect breaks, allow for them: ignoring them can
+  mislead the test, as in section 3. If you know the dates, give them.
+* **Common estimated breaks.** With `break_type = "homogeneous"`, the
+  normal p-value is too optimistic in finite samples; the output also
+  prints the paper's critical values for this case, which are more
+  reliable. In simulations of the paper's own design, this variant rejects
+  far too often in Model 5 when the slope shifts a lot (see the Breaks
+  section of `?pcoint_banerjee`), so prefer known dates or
+  `"heterogeneous"` there.
+* **Warnings.** If the estimation of the break dates did not converge, the
+  function says so; increase `iter_max` in `banerjee_control()`.
+
+## 7. Going further (optional)
+
+### Known dates that differ by unit
+
+If you know each unit's break date, give them in a data frame. Here we give
+the true dates of the simulated panel:
+
+```{r known}
+known <- unique(panel[, c("country", "true_break")])
+fit_known <- pcoint_banerjee(y ~ x, data = panel, index = c("country", "year"),
+                             model = 1, breaks = known)
+fit_known$statistics
+```
+
+The result is the same as with the estimated dates, because those were all
+found exactly.
+
+### More detail
+
+`summary()` adds the values of the factor criterion, the MQ tests when there
+are several factors, the selected lags, the break dates, and the test of
+each unit:
+
+```{r summary}
+summary(fit_breaks)
+```
+
+The pieces of the result are ordinary R objects, for example
+`fit_breaks$units` (one row per unit) and `fit_breaks$factors` (the
+estimated factors and their tests).
+
+### The model behind the test
+
+For unit $i$ and period $t$,
 
 $$
 y_{it} = D_{it} + x_{it}' \delta_{it} + u_{it}, \qquad
 u_{it} = F_t' \pi_i + e_{it},
 $$
 
-where $D_{it}$ holds a constant, possibly a trend, and level and trend
-shifts, and $\delta_{it}$ may shift at the break dates. The factors $F_t$
-may be I(0) or I(1). The test follows the PANIC approach of Bai and Ng
-(2004): each unit's cointegrating regression is estimated in first
-differences, the common factors are extracted from the residuals by
-principal components, and the defactored residuals are cumulated and tested
-for a unit root with ADF regressions. The pooled statistic
+where $D_{it}$ holds the constant, the trend and the breaks of the model,
+$\delta_{it}$ is the slope (which may change at the breaks), $F_t$ are the
+common factors, $\pi_i$ the unit's loadings and $e_{it}$ the idiosyncratic
+part. Following the PANIC approach of Bai and Ng (2004), each unit's
+regression is estimated in first differences, the factors are extracted
+from the residuals by principal components, and an ADF test is run on each
+unit's cumulated idiosyncratic residuals. The panel statistic is
 
 $$
-Z = \sqrt{N}\, \frac{\bar t - \Theta}{\sqrt{\Psi}}
+Z = \sqrt{N}\, \frac{\bar t - \Theta}{\sqrt{\Psi}},
 $$
 
-is asymptotically standard normal and left-tailed. Rejecting means that the
-idiosyncratic errors are stationary; the variables are cointegrated only if,
-in addition, no common factor is I(1). The factors are therefore tested
-separately: by an ADF test when there is one, and by the MQ tests of Bai and
-Ng (2004) when there are several.
+where $\bar t$ is the average of the $N$ unit-level ADF statistics and
+$\Theta$ and $\Psi$ are the "moments" printed in the output. Under the null
+hypothesis, $Z$ follows a standard normal distribution.
 
-## A simulated panel
+## Glossary
 
-We simulate 30 units over 80 years with one I(1) common factor, a regressor
-whose coefficient shifts in 1990, and cointegrated idiosyncratic errors.
-
-```{r data}
-set.seed(42)
-N <- 30
-T <- 80
-years <- 1950 + seq_len(T)
-f <- cumsum(rnorm(T))
-d <- do.call(rbind, lapply(seq_len(N), function(i) {
-  x <- cumsum(rnorm(T))
-  e <- as.numeric(stats::filter(rnorm(T), 0.5, method = "recursive"))
-  y <- 1 + 0.02 * seq_len(T) + x + 0.5 * (years > 1990) * x + rnorm(1, 1) * f + e
-  data.frame(country = i, year = years, y = y, x = x)
-}))
-```
-
-## Known breaks
-
-The break date is the last year of the old regime. Model 5 has a constant, a
-trend, a level shift and a shift in the cointegrating vector:
-
-```{r known}
-fit <- pcoint_banerjee(y ~ x, data = d, index = c("country", "year"),
-                       model = 5, breaks = 1990)
-fit
-```
-
-The idiosyncratic errors are stationary (Z rejects), but the common factor
-is I(1): `y` and `x` cointegrate only together with the common stochastic
-trend. `summary()` adds the unit-level ADF tests, the factor-number
-criterion and the selected lags:
-
-```{r summary}
-summary(fit)
-```
-
-## Estimated breaks
-
-With `breaks = 1` or `2`, the dates are estimated. Heterogeneous dates
-(one per unit) come from an iterative least-squares procedure that
-alternates between the break dates and the common factors:
-
-```{r hetero}
-het <- pcoint_banerjee(y ~ x, data = d, index = c("country", "year"),
-                       model = 5, breaks = 1)
-table(het$units$break_date)
-het$statistics
-```
-
-Common dates are chosen to minimise the statistic; the paper's Table III
-gives finite-sample critical values for this infimum. `plot()` shows the
-profile over the candidate dates:
-
-```{r homog, fig.width = 6, fig.height = 4}
-hom <- pcoint_banerjee(y ~ x, data = d, index = c("country", "year"),
-                       model = 2, breaks = 1, break_type = "homogeneous")
-hom$statistics
-plot(hom)
-```
-
-In simulations of the paper's own design, the infimum statistic in Model 5
-over-rejects when the cointegrating vector shifts a lot (see
-`inst/validation/RESULTS.md`); known dates or heterogeneous estimation are
-safer there.
-
-## Settings
-
-`factors` fixes the number of factors or chooses the criterion (IC_p1 of Bai
-and Ng 2002 by default, at most `max_factors = 6`), `lags` the ADF lag order
-(t-sig rule of Ng and Perron 1995 by default) and `dols` adds leads and lags
-of $\Delta^2 x$ for endogenous regressors. `banerjee_control()` holds the
-rest: the lag rule, the standardisation of the residuals before the
-principal components, finite-sample moments, and the MQ settings.
+* **ADF test**: the augmented Dickey-Fuller test, the standard test of a
+  unit root in one time series.
+* **Cointegration**: two or more wandering series that move together in the
+  long run, so that the gap between them stays within bounds.
+* **Common factor**: a hidden influence shared by many units, such as a
+  world business cycle.
+* **I(1) / stationary**: an I(1) series wanders (it has a unit root); a
+  stationary series fluctuates around a fixed level or trend.
+* **Idiosyncratic part**: what is specific to one unit, once the common
+  factors are removed.
+* **Loading**: how strongly a unit reacts to a common factor.
+* **Long format**: one row per unit and period, with the unit and time in
+  their own columns.
+* **Null hypothesis**: the statement a test assumes until the data provide
+  enough evidence against it. Here: no cointegration.
+* **Principal components**: a method that finds the patterns shared by most
+  of the units.
+* **P-value**: the probability of a result at least as extreme as the one
+  observed if the null hypothesis were true.
+* **Structural break**: a sudden, lasting change in the level, trend or
+  slope of a relationship.
 
 ## References
 
@@ -133,6 +454,17 @@ Banerjee, A. and Carrion-i-Silvestre, J. L. (2015). Cointegration in panel
 data with structural breaks and cross-section dependence. *Journal of
 Applied Econometrics* 30(1), 1-23.
 
+Banerjee, A. and Carrion-i-Silvestre, J. L. (2017). Testing for panel
+cointegration using common correlated effects estimators. Birmingham
+Business School Discussion Paper 2017-02.
+
+Juodis, A. and Reese, S. (2022). The incidental parameters problem in
+testing for remaining cross-section correlation. *Journal of Business and
+Economic Statistics* 40(3), 1191-1203.
+
 Ng, S. and Perron, P. (1995). Unit root tests in ARMA models with
 data-dependent methods for the selection of the truncation lag. *Journal of
 the American Statistical Association* 90, 268-281.
+
+Pesaran, M. H. (2015). Testing weak cross-sectional dependence in large
+panels. *Econometric Reviews* 34, 1089-1117.
